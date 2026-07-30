@@ -2745,7 +2745,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.07.30-5'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.07.30-6'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
@@ -2766,19 +2766,23 @@
           'self.addEventListener("fetch", e => {',
           '  const req = e.request;',
           '  if (req.method !== "GET") return;',
+          '  // 网络优先：有网拿最新，没网才用缓存',
           '  e.respondWith(',
-          '    caches.match(req).then(hit => hit || fetch(req).then(res => {',
+          '    fetch(req).then(res => {',
           '      if (res && res.ok && new URL(req.url).origin === location.origin) {',
           '        const copy = res.clone();',
           '        caches.open(CACHE).then(c => { try { c.put(req, copy); } catch(err){} });',
           '      }',
           '      return res;',
           '    }).catch(() => {',
-          '      if (req.mode === "navigate" || (req.headers.get("accept")||"").includes("text/html")) {',
-          '        return caches.match("./").then(r => r || caches.match("index.html"));',
-          '      }',
-          '      return new Response("Offline", {status:503});',
-          '    }))',
+          '      return caches.match(req).then(hit => {',
+          '        if (hit) return hit;',
+          '        if (req.mode === "navigate" || (req.headers.get("accept")||"").includes("text/html")) {',
+          '          return caches.match("./").then(r => r || caches.match("index.html"));',
+          '        }',
+          '        return new Response("Offline", {status:503});',
+          '      });',
+          '    })',
           '  );',
           '});'
         ].join('\n');
