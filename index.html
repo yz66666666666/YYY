@@ -2730,6 +2730,11 @@
     document.getElementById('ghGistId').value = syncGistId || '';
     render();
     updateUndoRedoButtons(); // 初始按钮状态（两个都是禁用）
+    // 显示当前版本号
+    (function() {
+      var ub = document.getElementById('checkUpdateBtn');
+      if (ub) ub.innerText = '🔄 v' + APP_VERSION;
+    })();
     // 初始化 IndexedDB 备份系统并启动自动备份调度
     initBackupDB().then(db => {
       if (db) {
@@ -2740,7 +2745,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.07.30-4'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.07.30-5'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
@@ -2815,7 +2820,7 @@
         if (btn) {
           btn.style.background = '#52c41a';
           btn.style.color = '#fff';
-          btn.innerText = '🔄 发现新版本(点我更新)';
+          btn.innerText = '🔄 新版本可用 (当前 v' + APP_VERSION + ')';
           btn.title = '点击立即更新';
         }
       } catch(e) {}
