@@ -197,7 +197,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.07.30-8</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.07.30-9</button>
     <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
     <button class="btn btn-secondary" onclick="openStatsConfig()">📊 统计配置</button>
@@ -258,6 +258,12 @@
     </div>
     <div class="modal-body">
       <ul class="field-list" id="fieldsList"></ul>
+      <div style="margin:8px 0;padding:8px 10px;background:#f6ffed;border-radius:6px;font-size:12px;color:#389e0d;line-height:1.6;">
+        <b>自动生成语法：</b><br>
+        <code>{date:YYMMDD}</code> 日期 → 260730 &nbsp; <code>{date:YYYY-MM-DD}</code> → 2026-07-30<br>
+        <code>{seq:key:3}</code> 每日序号 → 001 &nbsp; <code>{time:HHmm}</code> 时间 → 1430<br>
+        例：<code>{date:YYMMDD}{seq:orderNo:3}</code> → <b>260730001</b>
+      </div>
       <div class="add-field-row">
         <input id="newFieldLabel" placeholder="字段名，如：客户名称">
         <select id="newFieldType">
@@ -355,6 +361,11 @@
       <button class="btn btn-secondary" onclick="closeModal('syncModal')">关闭</button>
       <button class="btn btn-secondary" onclick="syncFromGist()">📥 从云端同步</button>
       <button class="btn btn-primary" onclick="syncToGist()">📤 同步到云端</button>
+    </div>
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid #e5e7eb;display:flex;gap:8px;justify-content:center;">
+      <button class="btn btn-secondary btn-sm" onclick="exportLocalData()">💾 导出本地数据</button>
+      <button class="btn btn-secondary btn-sm" onclick="document.getElementById('importFileInput').click()">📂 导入本地数据</button>
+      <input type="file" id="importFileInput" accept=".json" style="display:none" onchange="importLocalData(event)">
     </div>
   </div>
 </div>
@@ -522,7 +533,7 @@
 <script>
     // ============ 常量与全局状态 ============
     const DEFAULT_FIELDS = [
-      { key: 'orderNo',   label: '订单编号', type: 'text',     required: true,  builtin: true,  preset: true },
+      { key: 'orderNo',   label: '订单编号', type: 'text',     required: true,  builtin: true,  preset: true,  autoGen: '{date:YYMMDD}{seq:orderNo:3}' },
       { key: 'content',   label: '订单内容', type: 'text',     required: true,  builtin: false, preset: true },
       { key: 'spec',      label: '规格',     type: 'text',     required: false, builtin: false, preset: true },
       { key: 'customer',  label: '下单者',   type: 'text',     required: true,  builtin: false, preset: true },
@@ -938,6 +949,78 @@
         return formatDate(value);
       }
       return String(value);
+    }
+
+    // ============ 自动生成表达式引擎 ============
+    // 每日序号计数器，格式：{ "2026-07-30": { "orderNo": 5, "invoiceNo": 2 } }
+    let dailyCounters = {};
+
+    function loadDailyCounters() {
+      try {
+        const raw = localStorage.getItem('dailyCounters');
+        if (raw) dailyCounters = JSON.parse(raw);
+        // 清理非今天的旧计数器（保留7天）
+        const today = new Date().toISOString().slice(0, 10);
+        const keys = Object.keys(dailyCounters);
+        for (const k of keys) {
+          if (k < today) {
+            const d = new Date(k);
+            const diff = (new Date(today) - d) / (1000 * 60 * 60 * 24);
+            if (diff > 7) delete dailyCounters[k];
+          }
+        }
+      } catch (e) { dailyCounters = {}; }
+    }
+
+    function saveDailyCounters() {
+      try { localStorage.setItem('dailyCounters', JSON.stringify(dailyCounters)); } catch (e) {}
+    }
+
+    // 获取今日某个 key 的序号（自动递增）
+    function nextDailySeq(seqKey) {
+      const today = new Date().toISOString().slice(0, 10);
+      if (!dailyCounters[today]) dailyCounters[today] = {};
+      const current = dailyCounters[today][seqKey] || 0;
+      const next = current + 1;
+      dailyCounters[today][seqKey] = next;
+      saveDailyCounters();
+      return next;
+    }
+
+    // 预览自动生成表达式的值（不递增计数器）
+    function evalAutoGen(expr, forPreview) {
+      if (!expr || typeof expr !== 'string') return expr;
+      let result = expr;
+      // {date:FORMAT} - 当前日期，如 {date:YYMMDD} → 260730
+      result = result.replace(/\{date:([^}]+)\}/g, (match, fmt) => {
+        const now = new Date();
+        const pad = (n, len) => String(n).padStart(len, '0');
+        return fmt
+          .replace(/YYYY/g, String(now.getFullYear()))
+          .replace(/YY/g, String(now.getFullYear()).slice(-2))
+          .replace(/MM/g, pad(now.getMonth() + 1, 2))
+          .replace(/DD/g, pad(now.getDate(), 2))
+          .replace(/HH/g, pad(now.getHours(), 2))
+          .replace(/mm/g, pad(now.getMinutes(), 2))
+          .replace(/ss/g, pad(now.getSeconds(), 2));
+      });
+      // {time:FORMAT} - 当前时间
+      result = result.replace(/\{time:([^}]+)\}/g, (match, fmt) => {
+        const now = new Date();
+        const pad = (n, len) => String(n).padStart(len, '0');
+        return fmt
+          .replace(/HH/g, pad(now.getHours(), 2))
+          .replace(/mm/g, pad(now.getMinutes(), 2))
+          .replace(/ss/g, pad(now.getSeconds(), 2));
+      });
+      // {seq:KEY:LENGTH} - 每日序号，如 {seq:orderNo:3} → 001
+      result = result.replace(/\{seq:([^:}]+)(?::(\d+))?\}/g, (match, seqKey, len) => {
+        const length = parseInt(len) || 3;
+        if (forPreview) return '0'.repeat(length);
+        const num = nextDailySeq(seqKey);
+        return String(num).padStart(length, '0');
+      });
+      return result;
     }
 
     // ============ 公式求值 ============
@@ -1493,11 +1576,16 @@
     }
 
     function renderFormControl(field, val, idPrefix) {
+      const isNew = !editingId; // 新增时，自动生成字段显示为灰色占位符预览
       if (field.type === 'textarea') {
         return '<textarea class="form-textarea" data-field="' + escapeAttr(field.key) + '">' + escapeHtml(val || '') + '</textarea>';
       }
       if (field.type === 'number') {
-        return '<input type="number" class="form-input" data-field="' + escapeAttr(field.key) + '" value="' + escapeAttr(val == null ? '' : val) + '" step="any">';
+        let ph = '';
+        if (isNew && field.autoGen && (val === '' || val == null)) {
+          ph = ' placeholder="' + escapeAttr(evalAutoGen(field.autoGen, true) || '') + '"';
+        }
+        return '<input type="number" class="form-input" data-field="' + escapeAttr(field.key) + '" value="' + escapeAttr(val == null ? '' : val) + '" step="any"' + ph + '>';
       }
       if (field.type === 'datetime') {
         let dstr = '';
@@ -1546,7 +1634,12 @@
             '</div>' +
           '</div>';
       }
-      return '<input type="text" class="form-input" data-field="' + escapeAttr(field.key) + '" value="' + escapeAttr((typeof val === 'object' && val) ? (val.text || '') : (val == null ? '' : val)) + '">';
+      let phText = '';
+      const textVal = (typeof val === 'object' && val) ? (val.text || '') : (val == null ? '' : val);
+      if (isNew && field.autoGen && (textVal === '' || textVal == null)) {
+        phText = ' placeholder="' + escapeAttr(evalAutoGen(field.autoGen, true) || '') + '"';
+      }
+      return '<input type="text" class="form-input" data-field="' + escapeAttr(field.key) + '" value="' + escapeAttr(textVal) + '"' + phText + '>';
     }
 
     function clearImageField(idPrefixPlusKey) {
@@ -1658,6 +1751,20 @@
 
     function saveOrder() {
       const data = collectFormData(editingId ? 'edit_' : 'add_');
+      // 自动生成字段：新建时，若用户未手动填写则自动生成（消耗序号）
+      if (!editingId) {
+        fieldsConfig.forEach(f => {
+          if (f.autoGen && (f.type === 'text' || f.type === 'number')) {
+            const userVal = data[f.key];
+            const isEmpty = (userVal === '' || userVal === null || userVal === undefined);
+            if (isEmpty) {
+              const realVal = evalAutoGen(f.autoGen, false);
+              if (realVal) data[f.key] = realVal;
+              else data[f.key] = f.autoGen;
+            }
+          }
+        });
+      }
       // 隐藏字段处理：从已有订单或默认值中获取
       fieldsConfig.forEach(f => {
         if (!f.hidden || f.system || f.type === 'formula') return;
@@ -1703,9 +1810,10 @@
       } else {
         const newOrder = Object.assign({
           id: 'ord_' + Date.now() + '_' + Math.floor(Math.random()*1000),
-          createdAt: new Date().toISOString(),
-          orderNo: data.orderNo || ('NO' + Date.now())
+          createdAt: new Date().toISOString()
         }, data);
+        // orderNo 已经在上面 autoGen 处理过，不再硬编码 fallback
+        if (!newOrder.orderNo) newOrder.orderNo = 'NO' + Date.now();
         pushToDefaults(newOrder);
         orders.unshift(newOrder);
       }
@@ -2375,12 +2483,23 @@
           if (f.type !== 'textarea' && f.type !== 'select' && f.type !== 'datetime' && f.type !== 'formula') {
             html += '<button class="btn btn-secondary btn-sm" onclick="manageDefaultsClick(\'' + escapeAttr(f.key) + '\')">默认值</button>';
           }
+          // 自动生成表达式（文本和数字类型）
+          if (f.type === 'text' || f.type === 'number') {
+            html += '<div class="formula-expr" style="margin-left:8px;display:flex;align-items:center;gap:6px;">' +
+              '<span style="font-size:11px;color:#888;">自生成:</span>' +
+              '<input class="f-editable" placeholder="如 {date:YYMMDD}{seq:key:3}" value="' + escapeAttr(f.autoGen || '') + '" oninput="updateFieldAutoGen('+i+', this.value)" style="flex:1;font-size:12px;">' +
+              '</div>';
+          }
           // 删除
           html += '<button class="btn btn-danger btn-sm" onclick="deleteFieldItem('+i+')">删除</button>';
         } else {
           // 内置字段：允许修改标签（orderNo 可以改显示名），允许改位置（拖拽），但不能改类型/不能删
           if (f.key === 'orderNo') {
             html += '<button class="btn btn-secondary btn-sm" onclick="manageDefaultsClick(\'' + escapeAttr(f.key) + '\')">默认值</button>';
+            html += '<div class="formula-expr" style="margin-left:8px;display:flex;align-items:center;gap:6px;">' +
+              '<span style="font-size:11px;color:#888;">自生成:</span>' +
+              '<input class="f-editable" placeholder="如 {date:YYMMDD}{seq:No:3}" value="' + escapeAttr(f.autoGen || '') + '" oninput="updateFieldAutoGen('+i+', this.value)" style="flex:1;font-size:12px;">' +
+              '</div>';
           }
           html += '<span style="font-size:12px;color:#888;">位置可调</span>';
         }
@@ -2405,6 +2524,7 @@
 
     function updateFieldLabel(i, v) { fieldsConfig[i].label = v; }
     function updateFieldFormula(i, v) { fieldsConfig[i].formula = v; }
+    function updateFieldAutoGen(i, v) { fieldsConfig[i].autoGen = v || ''; }
     function openFormulaHelp() {
       const container = document.getElementById('formulaHelpFields');
       if (!container) return;
@@ -2697,6 +2817,55 @@
       });
     }
 
+    // ============ 本地导出导入 ============
+    function exportLocalData() {
+      const data = getCurrentSnapshot();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'order-manager-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('💾 本地数据已导出（' + data.orders.length + ' 条订单）');
+    }
+
+    function importLocalData(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const data = JSON.parse(e.target.result);
+          if (!data.orders || !Array.isArray(data.orders)) {
+            showToast('❌ 文件格式不正确，缺少订单数据');
+            return;
+          }
+          // 确认导入
+          if (!confirm('即将导入 ' + data.orders.length + ' 条订单，当前数据将被覆盖。\n\n确定继续？')) {
+            event.target.value = '';
+            return;
+          }
+          // 导入前备份当前数据
+          const beforeSnapshot = getCurrentSnapshot();
+          addBackup('overwritten', beforeSnapshot, '导入前备份 ' + new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }));
+          // 恢复数据
+          if (data.fieldsConfig && data.fieldsConfig.length) fieldsConfig = mergeFieldsFromStorage(data.fieldsConfig);
+          if (data.fieldDefaults) fieldDefaults = data.fieldDefaults;
+          if (Array.isArray(data.orders)) orders = data.orders;
+          if (data.statsConfig && Array.isArray(data.statsConfig)) statsConfig = data.statsConfig;
+          saveData('导入本地数据');
+          render();
+          showToast('✅ 导入成功！共 ' + data.orders.length + ' 条订单。旧数据已保存到"被覆盖备份"');
+        } catch (err) {
+          console.error(err);
+          showToast('❌ 文件解析失败，请确认选择的是 JSON 备份文件');
+        }
+      };
+      reader.readAsText(file);
+      event.target.value = '';
+    }
+
     // ============ 回车保存行内编辑 ============
     document.addEventListener('keydown', function(ev) {
       // Ctrl+Z / Ctrl+Y（mac: Cmd+Z / Cmd+Shift+Z）
@@ -2725,6 +2894,7 @@
 
     // ============ 启动 ============
     loadData();
+    loadDailyCounters();
     // 回填同步弹窗
     document.getElementById('ghToken').value = syncToken || '';
     document.getElementById('ghGistId').value = syncGistId || '';
@@ -2740,7 +2910,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.07.30-8'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.07.30-9'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
