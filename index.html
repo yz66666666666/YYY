@@ -127,6 +127,7 @@
   .chips-list { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
   .chip { background: #eef4ff; color: #1a73e8; padding: 3px 8px; border-radius: 12px; font-size: 12px; cursor: pointer; }
   .chip:hover { background: #d8e6ff; }
+  .chip.chip-active { background: #1a73e8; color: #fff; }
   .chip-manage-btn { background: transparent; border: 1px dashed #aaa; color: #888; padding: 2px 8px; border-radius: 12px; font-size: 12px; cursor: pointer; }
   .chip-manage-btn:hover { border-color: #1a73e8; color: #1a73e8; }
 
@@ -2111,9 +2112,12 @@
       editor.style.display = 'block';
       let editorHtml = '';
       editorHtml += renderInlineEditor(field, val);
+      const isSelectWithOptions = field.type === 'select' && field.options && field.options.length > 0;
       editorHtml += '<div class="ie-actions">';
       editorHtml += '<button class="btn btn-secondary btn-sm" onclick="closeInlineEditor()">取消</button>';
-      editorHtml += '<button class="btn btn-primary btn-sm" onclick="saveInlineEdit(event)">✓ 确定</button>';
+      if (!isSelectWithOptions) {
+        editorHtml += '<button class="btn btn-primary btn-sm" onclick="saveInlineEdit(event)">✓ 确定</button>';
+      }
       editorHtml += '</div>';
       editor.innerHTML = editorHtml;
 
@@ -2170,11 +2174,13 @@
         if (!field.options || field.options.length === 0) {
           html += '<input class="ie-input" id="ieInput" value="' + escapeAttr(val || '') + '">';
         } else {
-          let opts = '';
+          // 点击即选，不需要确定按钮
+          html += '<div class="chips-list" style="flex-wrap:wrap;">';
           field.options.forEach(o => {
-            opts += '<option value="' + escapeAttr(o.value) + '"' + (val === o.value ? ' selected' : '') + '>' + escapeHtml(o.label) + '</option>';
+            const active = (val === o.value) ? ' chip-active' : '';
+            html += '<div class="chip' + active + '" onclick="ieSelectOption(\'' + escapeAttr(o.value) + '\')">' + escapeHtml(o.label) + '</div>';
           });
-          html += '<select class="ie-select" id="ieInput">' + opts + '</select>';
+          html += '</div>';
         }
       } else if (field.type === 'textarea') {
         html += '<textarea class="ie-textarea" id="ieInput">' + escapeHtml(val || '') + '</textarea>';
@@ -2266,6 +2272,18 @@
       document.getElementById('inlineMask').classList.remove('show');
       currentInlineFieldKey = null;
       currentInlineOrderId = null;
+    }
+
+    // 下拉选择直接点击生效
+    function ieSelectOption(value) {
+      const field = fieldsConfig.find(f => f.key === currentInlineFieldKey);
+      if (!field) return;
+      const order = orders.find(o => o.id === currentInlineOrderId);
+      if (!order) return;
+      order[field.key] = value;
+      saveData('行内编辑: ' + field.label);
+      render();
+      closeInlineEditor();
     }
 
     function saveInlineEdit(ev) {
