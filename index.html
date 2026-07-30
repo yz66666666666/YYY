@@ -509,6 +509,7 @@
         <div class="backup-tab active" data-tab="shortTerm" onclick="switchBackupTab('shortTerm')" style="padding:8px 16px;cursor:pointer;font-size:14px;border-bottom:2px solid #1a73e8;margin-bottom:-2px;color:#1a73e8;font-weight:500;">🔄 短期备份</div>
         <div class="backup-tab" data-tab="longTerm" onclick="switchBackupTab('longTerm')" style="padding:8px 16px;cursor:pointer;font-size:14px;color:#555;">📅 长期备份</div>
         <div class="backup-tab" data-tab="history" onclick="switchBackupTab('history')" style="padding:8px 16px;cursor:pointer;font-size:14px;color:#555;">👣 操作历史</div>
+        <div class="backup-tab" data-tab="overwritten" onclick="switchBackupTab('overwritten')" style="padding:8px 16px;cursor:pointer;font-size:14px;color:#555;">🔄 被覆盖备份</div>
       </div>
       <div id="backupList" style="max-height:50vh;overflow-y:auto;"></div>
     </div>
@@ -565,9 +566,9 @@
 
     // ============ IndexedDB 备份系统 ============
     const BACKUP_DB_NAME = 'OrderManagerBackupDB';
-    const BACKUP_DB_VERSION = 1;
-    const BACKUP_STORES = ['shortTerm', 'longTerm', 'history']; // 短期/长期/操作历史
-    const BACKUP_LIMITS = { shortTerm: 10, longTerm: 10, history: 100 };
+    const BACKUP_DB_VERSION = 2;
+    const BACKUP_STORES = ['shortTerm', 'longTerm', 'history', 'overwritten']; // 短期/长期/操作历史/被覆盖备份
+    const BACKUP_LIMITS = { shortTerm: 10, longTerm: 10, history: 100, overwritten: 10 };
     let backupDB = null;
     let lastHistorySnapshot = null; // 用于操作历史 diff
     let lastShortBackupTime = 0;
@@ -795,7 +796,8 @@
           const hints = {
             shortTerm: '暂无短期备份。系统每 20 分钟自动备份一次。',
             longTerm: '暂无长期备份。系统每天自动备份一次。',
-            history: '暂无操作历史。每次增删改订单时会自动记录。'
+            history: '暂无操作历史。每次增删改订单时会自动记录。',
+            overwritten: '暂无被覆盖备份。每次使用历史备份恢复数据时，被覆盖的旧数据会自动保存到这里。'
           };
           el.innerHTML = '<div style="text-align:center;color:#999;padding:20px;">' + (hints[storeName] || '暂无备份') + '</div>';
           return;
@@ -860,9 +862,12 @@
     }
     function doRestoreBackup(storeName, backupId) {
       pendingBackupAction = null;
+      // 恢复前先把当前数据存为"被覆盖备份"，防止后悔
+      const beforeSnapshot = getCurrentSnapshot();
+      addBackup('overwritten', beforeSnapshot, '覆盖前备份 ' + new Date().toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }));
       restoreBackup(storeName, backupId).then(ok => {
         if (ok) {
-          showToast('✅ 恢复成功！当前数据已更新为该备份的内容。');
+          showToast('✅ 恢复成功！当前数据已更新为该备份的内容。被覆盖的旧数据已保存到"被覆盖备份"标签页。');
           document.getElementById('historyBackupModal').classList.remove('show');
         } else {
           showToast('❌ 恢复失败，请重试');
@@ -2735,7 +2740,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.07.30-3'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.07.30-4'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
