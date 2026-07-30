@@ -1585,7 +1585,7 @@
         if (isNew && field.autoGen && (val === '' || val == null)) {
           ph = ' placeholder="' + escapeAttr(evalAutoGen(field.autoGen, true) || '') + '"';
         }
-        return '<input type="number" class="form-input" data-field="' + escapeAttr(field.key) + '" value="' + escapeAttr(val == null ? '' : val) + '" step="any"' + ph + '>';
+        return '<input type="text" inputmode="decimal" class="form-input" data-field="' + escapeAttr(field.key) + '" value="' + escapeAttr(val == null ? '' : val) + '"' + ph + '>';
       }
       if (field.type === 'datetime') {
         let dstr = '';
@@ -2179,7 +2179,7 @@
       } else if (field.type === 'textarea') {
         html += '<textarea class="ie-textarea" id="ieInput">' + escapeHtml(val || '') + '</textarea>';
       } else if (field.type === 'number') {
-        html += '<input class="ie-input" type="number" id="ieInput" value="' + escapeAttr(val == null ? '' : val) + '" step="any">';
+        html += '<input class="ie-input" type="text" inputmode="decimal" id="ieInput" value="' + escapeAttr(val == null ? '' : val) + '">';
       } else if (field.type === 'datetime') {
         let dstr = '';
         if (val) {
