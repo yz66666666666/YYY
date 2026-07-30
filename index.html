@@ -1,0 +1,2846 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#1a73e8">
+<title>订单管理系统</title>
+<link rel="manifest" href="data:application/manifest+json,{&quot;name&quot;:&quot;订单管理系统&quot;,&quot;short_name&quot;:&quot;订单&quot;,&quot;start_url&quot;:&quot;.&quot;,&quot;display&quot;:&quot;standalone&quot;,&quot;background_color&quot;:&quot;#f5f6fa&quot;,&quot;theme_color&quot;:&quot;#1a73e8&quot;}">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; background: #f5f6fa; color: #222; }
+  header { background: #fff; padding: 12px 16px; border-bottom: 1px solid #e8e8e8; position: sticky; top: 0; z-index: 100; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+  header h1 { margin: 0; font-size: 18px; color: #1a73e8; }
+  .header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn { border: none; padding: 8px 14px; border-radius: 6px; font-size: 14px; cursor: pointer; transition: background 0.2s; }
+  .btn-primary { background: #1a73e8; color: #fff; }
+  .btn-primary:hover { background: #1765cc; }
+  .btn-secondary { background: #eef1f6; color: #333; }
+  .btn-secondary:hover { background: #e1e5eb; }
+  .btn-danger { background: #fde8e8; color: #c9302c; }
+  .btn-danger:hover { background: #f9d4d4; }
+  .btn-sm { padding: 4px 10px; font-size: 12px; border-radius: 4px; }
+  .toolbar { padding: 12px 16px; background: #fff; border-bottom: 1px solid #e8e8e8; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .toolbar input, .toolbar select { padding: 6px 10px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 14px; }
+  .batch-bar { padding: 8px 16px; background: #e6f7ff; border-bottom: 1px solid #91d5ff; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .batch-bar #batchCount { margin-right: auto; }
+  .checkbox-cell { width: 36px; text-align: center; white-space: nowrap; }
+  .checkbox-cell input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; vertical-align: middle; }
+  .card-checkbox { padding: 4px 0; }
+  main { padding: 16px; }
+
+  /* 桌面 - 表格视图 */
+  .table-wrap { overflow-x: auto; background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+  table { width: 100%; border-collapse: collapse; min-width: 800px; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #f0f0f0; font-size: 14px; vertical-align: middle; }
+  th { background: #fafbfc; font-weight: 600; color: #555; white-space: nowrap; position: sticky; top: 0; }
+  tr:hover td { background: #f8faff; }
+  td.clickable { cursor: pointer; }
+  td.clickable:hover { background: #eef4ff; outline: 1px dashed #a8c7ff; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+  .tag-pending    { background: #fff7e6; color: #d48806; }
+  .tag-processing { background: #e6f4ff; color: #0958d9; }
+  .tag-completed  { background: #f6ffed; color: #389e0d; }
+  .tag-cancelled  { background: #f5f5f5; color: #595959; }
+  .tag-default    { background: #f0f0f0; color: #333; }
+  .actions-cell { white-space: nowrap; width: 140px; }
+  .actions-cell .btn-sm { margin-right: 4px; }
+
+  .img-txt { display: flex; align-items: center; gap: 6px; }
+  .img-txt img { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; }
+  .img-txt .thumb { width: 40px; height: 40px; background: #f0f0f0; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 16px; color: #aaa; }
+  .img-full-max { max-width: 200px; max-height: 200px; object-fit: contain; border-radius: 4px; }
+
+  /* 移动端 - 卡片视图 */
+  .card-list { display: none; flex-direction: column; gap: 10px; }
+  .card { background: #fff; border-radius: 8px; padding: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+  .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #f0f0f0; }
+  .card-title { font-weight: 600; font-size: 15px; color: #1a73e8; }
+  .card-actions { display: flex; gap: 4px; }
+  .card-row { display: flex; margin-bottom: 6px; font-size: 14px; line-height: 1.5; }
+  .card-label { width: 80px; color: #888; flex-shrink: 0; }
+  .card-value { flex: 1; color: #222; word-break: break-all; cursor: pointer; }
+  .card-value:hover { background: #f8faff; outline: 1px dashed #a8c7ff; border-radius: 3px; }
+  @media (max-width: 768px) {
+    .table-wrap { display: none; }
+    .card-list { display: flex; }
+    header h1 { font-size: 16px; }
+    .btn { padding: 6px 10px; font-size: 13px; }
+  }
+
+  /* 弹窗通用 */
+  .modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 1000; padding: 12px; }
+  .modal-mask.show { display: flex; }
+  .modal { background: #fff; border-radius: 8px; width: 100%; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; }
+  .modal-lg { max-width: 720px; }
+  .modal-md { max-width: 520px; }
+  .modal-sm { max-width: 400px; }
+  .modal-hdr { padding: 14px 18px; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; }
+  .modal-hdr h3 { margin: 0; font-size: 16px; }
+  .close-x { font-size: 22px; color: #999; cursor: pointer; background: none; border: none; line-height: 1; }
+  .close-x:hover { color: #333; }
+  .modal-body { padding: 16px 18px; overflow-y: auto; flex: 1; }
+  .modal-ftr { padding: 12px 18px; border-top: 1px solid #f0f0f0; display: flex; justify-content: flex-end; gap: 8px; }
+  @media (max-width: 768px) {
+    .modal { max-width: 100%; }
+  }
+
+  /* 表单 */
+  .form-row { display: flex; margin-bottom: 12px; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+  .form-row > label { width: 100px; padding-top: 7px; color: #555; font-size: 14px; flex-shrink: 0; }
+  .form-row > label.req::before { content: "*"; color: #e03c3c; margin-right: 3px; }
+  .form-row .ctl { flex: 1; min-width: 200px; }
+  .form-input, .form-select, .form-textarea { width: 100%; padding: 7px 10px; border: 1px solid #d9d9d9; border-radius: 5px; font-size: 14px; font-family: inherit; }
+  .form-textarea { min-height: 70px; resize: vertical; }
+  .form-row-hint { font-size: 12px; color: #999; margin-top: 3px; }
+
+  /* 字段设置列表 */
+  .field-list { list-style: none; padding: 0; margin: 0; }
+  .field-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid #e8e8e8; border-radius: 6px; margin-bottom: 8px; background: #fafbfc; }
+  .field-item.drag-over { border-top: 3px solid #1a73e8; }
+  .field-item.dragging { opacity: 0.4; }
+  .drag-handle { color: #bbb; cursor: grab; padding: 2px 6px; font-size: 16px; user-select: none; }
+  .field-item .f-label { flex: 1; font-weight: 500; }
+  .field-item .f-type { background: #eef1f6; color: #555; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+  .field-item .builtin-tag { background: #fff4e5; color: #b86100; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+  .field-item .f-editable { background: #fff; border: 1px solid #d9d9d9; padding: 3px 8px; border-radius: 4px; font-size: 13px; }
+  .field-item-btns { display: flex; gap: 6px; align-items: center; }
+  .add-field-row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .add-field-row select, .add-field-row input { padding: 6px 10px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 13px; }
+
+  /* 图片上传 / imageText */
+  .image-uploader { display: flex; gap: 12px; align-items: flex-start; }
+  .image-uploader .preview { width: 90px; height: 90px; border: 1px dashed #bbb; border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer; overflow: hidden; position: relative; background: #fafafa; }
+  .image-uploader .preview img { width: 100%; height: 100%; object-fit: cover; }
+  .image-uploader .add-plus { font-size: 28px; color: #bbb; }
+  .image-uploader .clear-btn { position: absolute; top: 2px; right: 2px; background: rgba(255,80,80,0.9); color: #fff; border: none; width: 20px; height: 20px; border-radius: 50%; cursor: pointer; font-size: 14px; line-height: 1; padding: 0; }
+  .image-uploader .text-side { flex: 1; min-width: 0; }
+
+  /* 行内编辑器 弹窗 */
+  .inline-editor-mask { position: fixed; inset: 0; background: transparent; z-index: 999; display: none; }
+  .inline-editor-mask.show { display: block; }
+  .inline-editor { position: absolute; background: #fff; border: 1px solid #d9d9d9; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.15); padding: 10px; z-index: 1000; min-width: 260px; max-width: 320px; }
+  .inline-editor .ie-input { width: 100%; padding: 6px 8px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 14px; margin-bottom: 8px; }
+  .inline-editor .ie-select { width: 100%; padding: 6px 8px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 14px; margin-bottom: 8px; }
+  .inline-editor .ie-textarea { width: 100%; padding: 6px 8px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 14px; min-height: 60px; resize: vertical; margin-bottom: 8px; }
+  .inline-editor .ie-actions { display: flex; justify-content: flex-end; gap: 6px; }
+  .chips-list { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+  .chip { background: #eef4ff; color: #1a73e8; padding: 3px 8px; border-radius: 12px; font-size: 12px; cursor: pointer; }
+  .chip:hover { background: #d8e6ff; }
+  .chip-manage-btn { background: transparent; border: 1px dashed #aaa; color: #888; padding: 2px 8px; border-radius: 12px; font-size: 12px; cursor: pointer; }
+  .chip-manage-btn:hover { border-color: #1a73e8; color: #1a73e8; }
+
+  /* 默认选项管理弹窗 */
+  .defaults-list { list-style: none; padding: 0; margin: 0 0 8px 0; }
+  .defaults-list li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid #f0f0f0; }
+  .defaults-list li .v { flex: 1; word-break: break-all; }
+  .add-default-row { display: flex; gap: 6px; }
+  .add-default-row input { flex: 1; padding: 6px 10px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 13px; }
+
+  /* 选项编辑弹窗（select） */
+  .opts-list { list-style: none; padding: 0; margin: 0 0 10px 0; max-height: 300px; overflow-y: auto; }
+  .opts-list li { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px solid #f0f0f0; }
+  .opts-list li input { flex: 1; padding: 5px 8px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 13px; }
+  .opts-list li span { color: #bbb; font-size: 12px; }
+  .empty-hint { color: #999; font-size: 13px; padding: 12px 0; text-align: center; }
+
+  /* 统计栏 */
+  .stats-bar { display: flex; gap: 12px; padding: 14px 16px; background: linear-gradient(135deg, #f8faff 0%, #eef4ff 100%); border-bottom: 1px solid #e8e8e8; flex-wrap: wrap; align-items: stretch; }
+  .stat-card { display: flex; align-items: center; gap: 12px; padding: 14px 18px; background: #fff; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); min-width: 160px; flex: 1; }
+  .stat-icon { width: 42px; height: 42px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 22px; }
+  .stat-icon.blue   { background: #e6f0ff; color: #1a73e8; }
+  .stat-icon.green  { background: #e6ffed; color: #389e0d; }
+  .stat-icon.orange { background: #fff4e5; color: #d48806; }
+  .stat-icon.purple { background: #f3e6ff; color: #722ed1; }
+  .stat-icon.red    { background: #ffe6e6; color: #cf1322; }
+  .stat-info .stat-val { font-size: 22px; font-weight: 700; color: #222; line-height: 1.2; }
+  .stat-info .stat-label { font-size: 12px; color: #888; margin-top: 2px; }
+  .stats-config-btn { margin-left: auto; align-self: center; }
+  .formula-field-badge { display: inline-block; padding: 1px 6px; border-radius: 4px; background: #f3e6ff; color: #722ed1; font-size: 11px; margin-left: 4px; }
+  .f-type.formula-tag { background: #f3e6ff; color: #722ed1; }
+  .formula-expr { display: flex; gap: 6px; align-items: center; }
+  .formula-expr input { flex: 1; min-width: 140px; }
+  .formula-hint { font-size: 12px; color: #888; margin-top: 4px; }
+
+  /* Toast 提示 */
+  .toast-tip { position: fixed; left: 50%; top: 24px; transform: translateX(-50%); background: rgba(30,30,30,0.92); color: #fff; padding: 10px 18px; border-radius: 6px; font-size: 14px; z-index: 2000; box-shadow: 0 4px 12px rgba(0,0,0,0.2); opacity: 0; transition: opacity 0.25s; pointer-events: none; max-width: 90vw; }
+  .toast-tip.show { opacity: 1; }
+  /* 备份确认行 */
+  .backup-confirm-row { display: flex; gap: 6px; align-items: center; }
+  .backup-warn { font-size: 12px; color: #c9302c; margin-right: 4px; }
+
+  /* 撤销/重做圆形按钮 */
+  .nav-btns { display: flex; align-items: center; gap: 6px; margin-right: 8px; }
+  .nav-btn {
+    width: 34px; height: 34px; border-radius: 50%;
+    border: 1px solid #d9d9d9; background: #fff; color: #555;
+    font-size: 16px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    line-height: 1;
+  }
+  .nav-btn:hover:not(:disabled) { background: #eef4ff; border-color: #a8c7ff; color: #1a73e8; }
+  .nav-btn:disabled { cursor: not-allowed; opacity: 0.4; }
+  .nav-btn:active:not(:disabled) { background: #dbe8ff; }
+</style>
+</head>
+<body>
+
+<div id="toastTip" class="toast-tip"></div>
+
+<header>
+  <div style="display:flex;align-items:center;gap:4px;">
+    <div class="nav-btns">
+      <button id="undoBtn" class="nav-btn" onclick="undoAction()" title="上一步 (Ctrl+Z)" disabled>↶</button>
+      <button id="redoBtn" class="nav-btn" onclick="redoAction()" title="下一步 (Ctrl+Y)" disabled>↷</button>
+    </div>
+    <h1>📋 订单管理系统</h1>
+  </div>
+  <div class="header-actions">
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 检查更新</button>
+    <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
+    <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
+    <button class="btn btn-secondary" onclick="openStatsConfig()">📊 统计配置</button>
+    <button class="btn btn-secondary" onclick="document.getElementById('syncModal').classList.add('show')">☁️ 同步</button>
+  </div>
+</header>
+
+<div class="stats-bar" id="statsBar"></div>
+
+<div class="toolbar">
+  <input id="searchInput" placeholder="🔍 搜索订单号 / 内容 / 客户 / 地址..." oninput="render()">
+  <select id="statusFilter" onchange="render()">
+    <option value="">全部状态</option>
+  </select>
+  <button class="btn btn-secondary btn-sm" style="margin-left:auto;" onclick="renderFieldsSettings();document.getElementById('fieldsModal').classList.add('show')">⚙️ 字段设置</button>
+</div>
+
+<!-- 批量操作栏 -->
+<div class="batch-bar" id="batchBar" style="display:none;">
+  <span id="batchCount" style="font-size:13px;color:#555;">已选择 0 项</span>
+  <button class="btn btn-secondary btn-sm" onclick="clearSelection()">取消选择</button>
+  <button class="btn btn-secondary btn-sm" onclick="selectAllVisible()">全选当前</button>
+  <button class="btn btn-primary btn-sm" onclick="openBatchCalc()">🧮 批量计算</button>
+  <button class="btn btn-danger btn-sm" onclick="batchDelete()">🗑️ 批量删除</button>
+</div>
+
+<main>
+  <div class="table-wrap">
+    <table id="ordersTable">
+      <thead id="tableHead"></thead>
+      <tbody id="ordersTbody"></tbody>
+    </table>
+  </div>
+  <div class="card-list" id="cardList"></div>
+</main>
+
+<!-- ============ 新增/编辑订单弹窗 ============ -->
+<div class="modal-mask" id="orderModal">
+  <div class="modal modal-lg">
+    <div class="modal-hdr">
+      <h3 id="orderModalTitle">新增订单</h3>
+      <button class="close-x" onclick="closeModal('orderModal')">×</button>
+    </div>
+    <div class="modal-body" id="orderFormBody"></div>
+    <div class="modal-ftr">
+      <button class="btn btn-secondary" onclick="closeModal('orderModal')">取消</button>
+      <button class="btn btn-primary" onclick="saveOrder()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 字段设置弹窗 ============ -->
+<div class="modal-mask" id="fieldsModal">
+  <div class="modal modal-lg">
+    <div class="modal-hdr">
+      <h3>字段设置（拖动可调整顺序，仅订单编号和创建时间不可删除）</h3>
+      <button class="close-x" onclick="closeModal('fieldsModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <ul class="field-list" id="fieldsList"></ul>
+      <div class="add-field-row">
+        <input id="newFieldLabel" placeholder="字段名，如：客户名称">
+        <select id="newFieldType">
+          <option value="text">文本</option>
+          <option value="number">数字</option>
+          <option value="textarea">多行文本</option>
+          <option value="select">下拉选择</option>
+          <option value="imageText">图片+文本</option>
+          <option value="formula">公式（自动计算）</option>
+        </select>
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;">
+          <input type="checkbox" id="newFieldRequired"> 必填
+        </label>
+        <button class="btn btn-primary btn-sm" onclick="addNewField()">+ 新增字段</button>
+      </div>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-secondary" onclick="closeModal('fieldsModal')">取消</button>
+      <button class="btn btn-primary" onclick="saveFieldSettings()">保存并应用</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 行内编辑器 ============= -->
+<div class="inline-editor-mask" id="inlineMask" onclick="closeInlineEditor()"></div>
+<div class="inline-editor" id="inlineEditor" style="display:none"></div>
+
+<!-- ============ 默认选项管理弹窗 ============ -->
+<div class="modal-mask" id="defaultsModal">
+  <div class="modal modal-sm">
+    <div class="modal-hdr">
+      <h3 id="defaultsModalTitle">管理默认选项</h3>
+      <button class="close-x" onclick="closeDefaultsModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div style="margin-bottom:8px;color:#555;font-size:13px;">为该字段添加、删除常用默认值。行内编辑时会以快捷标签形式显示。</div>
+      <ul class="defaults-list" id="defaultsList"></ul>
+      <div class="add-default-row">
+        <input id="newDefaultInput" placeholder="输入默认值，回车或点击添加" onkeydown="if(event.key==='Enter')saveDefaultOption()">
+        <button class="btn btn-primary btn-sm" onclick="saveDefaultOption()">添加</button>
+      </div>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-primary" onclick="closeDefaultsModal()">完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ select字段选项编辑弹窗 ============ -->
+<div class="modal-mask" id="optionsModal">
+  <div class="modal modal-md">
+    <div class="modal-hdr">
+      <h3 id="optionsModalTitle">编辑下拉选项</h3>
+      <button class="close-x" onclick="closeOptionsModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div style="margin-bottom:8px;color:#555;font-size:13px;">可以修改每个选项的显示文本（如状态字段的"待处理"可自定义）。删除所有选项后将变为纯文本输入。</div>
+      <ul class="opts-list" id="optsList"></ul>
+      <button class="btn btn-secondary btn-sm" onclick="addOptionRow()">+ 添加一个选项</button>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-secondary" onclick="closeOptionsModal()">取消</button>
+      <button class="btn btn-primary" onclick="saveOptionsConfig()">保存选项</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 同步设置弹窗 ============ -->
+<div class="modal-mask" id="syncModal">
+  <div class="modal modal-md">
+    <div class="modal-hdr">
+      <h3>☁️ 数据同步（GitHub Gist）</h3>
+      <button class="close-x" onclick="closeModal('syncModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div style="margin-bottom:10px;padding:10px;background:#eef6ff;border-radius:6px;font-size:13px;color:#0958d9;">
+        首次使用：在 GitHub 生成一个 token（勾选 gist 权限），填入后点击"同步到云端"。系统会自动创建 Gist。之后在另一设备填入相同 token，点击"从云端同步"即可。
+      </div>
+      <div class="form-row">
+        <label>GitHub Token</label>
+        <div class="ctl">
+          <input class="form-input" id="ghToken" placeholder="ghp_xxxxxxxxxxxxxxxx">
+        </div>
+      </div>
+      <div class="form-row">
+        <label>Gist ID</label>
+        <div class="ctl">
+          <input class="form-input" id="ghGistId" placeholder="留空自动创建">
+          <div class="form-row-hint">首次留空，系统创建后会自动回填，建议复制保存</div>
+        </div>
+      </div>
+      <div id="syncStatus" style="font-size:13px;padding:8px;border-radius:4px;"></div>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-secondary" onclick="closeModal('syncModal')">关闭</button>
+      <button class="btn btn-secondary" onclick="syncFromGist()">📥 从云端同步</button>
+      <button class="btn btn-primary" onclick="syncToGist()">📤 同步到云端</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 统计配置弹窗 ============ -->
+<div class="modal-mask" id="statsConfigModal">
+  <div class="modal modal-md">
+    <div class="modal-hdr">
+      <h3>📊 统计栏配置</h3>
+      <button class="close-x" onclick="closeStatsConfig()">×</button>
+    </div>
+    <div class="modal-body">
+      <div style="margin-bottom:10px;color:#555;font-size:13px;">选择要在统计栏显示的项目。数字字段可求和/平均，其他字段可计数。</div>
+      <div id="statsConfigList" style="display:flex;flex-direction:column;gap:8px;"></div>
+      <button class="btn btn-secondary btn-sm" onclick="addStatsItem()" style="margin-top:10px;">+ 添加统计项</button>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-secondary" onclick="closeStatsConfig()">取消</button>
+      <button class="btn btn-primary" onclick="saveStatsConfig()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 公式帮助弹窗 ============ -->
+<div class="modal-mask" id="formulaHelpModal">
+  <div class="modal modal-lg">
+    <div class="modal-hdr">
+      <h3>📐 公式使用说明</h3>
+      <button class="close-x" onclick="document.getElementById('formulaHelpModal').classList.remove('show')">×</button>
+    </div>
+    <div class="modal-body" style="max-height:60vh;overflow-y:auto;">
+      <div style="margin-bottom:14px;">
+        <h4 style="margin:0 0 8px 0;color:#1677ff;">📖 基本规则</h4>
+        <ul style="margin:0;padding-left:20px;color:#555;font-size:13px;line-height:1.8;">
+          <li>支持加(+)、减(-)、乘(*)、除(/)和括号()</li>
+          <li>可以用<b>中文名</b>或<b>英文名</b>引用字段，效果相同</li>
+          <li>公式字段为只读，自动根据其他字段计算</li>
+        </ul>
+      </div>
+      <div style="margin-bottom:14px;">
+        <h4 style="margin:0 0 8px 0;color:#1677ff;">🔢 可用函数</h4>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <tr style="background:#f5f5f5;"><th style="padding:6px 10px;text-align:left;border:1px solid #e8e8e8;">函数</th><th style="padding:6px 10px;text-align:left;border:1px solid #e8e8e8;">说明</th><th style="padding:6px 10px;text-align:left;border:1px solid #e8e8e8;">示例</th></tr>
+          <tr><td style="padding:6px 10px;border:1px solid #e8e8e8;font-family:monospace;">round(x, n)</td><td style="padding:6px 10px;border:1px solid #e8e8e8;">四舍五入到 n 位小数</td><td style="padding:6px 10px;border:1px solid #e8e8e8;font-family:monospace;color:#722ed1;">round(3.1415, 2) = 3.14</td></tr>
+          <tr><td style="padding:6px 10px;border:1px solid #e8e8e8;font-family:monospace;">round(x)</td><td style="padding:6px 10px;border:1px solid #e8e8e8;">四舍五入到整数</td><td style="padding:6px 10px;border:1px solid #e8e8e8;font-family:monospace;color:#722ed1;">round(3.6) = 4</td></tr>
+          <tr><td style="padding:6px 10px;border:1px solid #e8e8e8;font-family:monospace;">abs(x)</td><td style="padding:6px 10px;border:1px solid #e8e8e8;">绝对值</td><td style="padding:6px 10px;border:1px solid #e8e8e8;font-family:monospace;color:#722ed1;">abs(-5) = 5</td></tr>
+          <tr><td style="padding:6px 10px;border:1px solid #e8e8e8;font-family:monospace;">ceil(x)</td><td style="padding:6px 10px;border:1px solid #e8e8e8;">向上取整</td><td style="padding:6px 10px;border:1px solid #e8e8e8;font-family:monospace;color:#722ed1;">ceil(3.1) = 4</td></tr>
+          <tr><td style="padding:6px 10px;border:1px solid #e8e8e8;font-family:monospace;">floor(x)</td><td style="padding:6px 10px;border:1px solid #e8e8e8;">向下取整</td><td style="padding:6px 10px;border:1px solid #e8e8e8;font-family:monospace;color:#722ed1;">floor(3.9) = 3</td></tr>
+        </table>
+      </div>
+      <div style="margin-bottom:14px;">
+        <h4 style="margin:0 0 8px 0;color:#1677ff;">📋 可用字段</h4>
+        <div id="formulaHelpFields" style="display:flex;flex-wrap:wrap;gap:6px;font-size:13px;"></div>
+      </div>
+      <div style="margin-bottom:4px;">
+        <h4 style="margin:0 0 8px 0;color:#1677ff;">💡 实用示例</h4>
+        <div style="font-size:13px;line-height:1.8;">
+          <div>💸 <b>利润</b>（价格-成本）：<code style="background:#f5f5f5;padding:2px 6px;border-radius:3px;">价格 - 成本</code></div>
+          <div>💰 <b>含税金额</b>：<code style="background:#f5f5f5;padding:2px 6px;border-radius:3px;">round(价格 + 价格 * 税率, 2)</code></div>
+          <div>🎯 <b>打折价</b>（8折）：<code style="background:#f5f5f5;padding:2px 6px;border-radius:3px;">round(价格 * 0.8, 2)</code></div>
+          <div>📊 <b>利润率</b>：<code style="background:#f5f5f5;padding:2px 6px;border-radius:3px;">round((价格 - 成本) / 价格 * 100, 2)</code></div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-primary" onclick="document.getElementById('formulaHelpModal').classList.remove('show')">知道了</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 批量计算器弹窗 ============ -->
+<div class="modal-mask" id="batchCalcModal">
+  <div class="modal modal-lg">
+    <div class="modal-hdr">
+      <h3>🧮 批量计算器</h3>
+      <button class="close-x" onclick="document.getElementById('batchCalcModal').classList.remove('show')">×</button>
+    </div>
+    <div class="modal-body">
+      <div style="margin-bottom:12px;color:#555;font-size:13px;">
+        对已选中的 <b id="batchCalcCount">0</b> 个订单进行公式计算。点击预设填入公式，或手动输入。
+      </div>
+      <!-- 预设公式区 -->
+      <div style="margin-bottom:10px;">
+        <div style="display:flex;align-items:center;margin-bottom:6px;">
+          <span style="font-size:12px;color:#888;">快捷预设</span>
+          <span style="flex:1;"></span>
+          <span class="btn btn-secondary btn-sm" onclick="openPresetEditor(-1)">+ 新增预设</span>
+        </div>
+        <div id="batchPresets" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+      </div>
+      <!-- 历史记录区 -->
+      <div style="margin-bottom:12px;border-top:1px dashed #e8e8e8;padding-top:10px;">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+          <span style="font-size:12px;color:#888;">最近使用</span>
+          <span style="flex:1;"></span>
+          <span id="historyMoreBtn" style="font-size:11px;color:#1677ff;cursor:pointer;display:none;" onclick="toggleCalcHistory()">展开历史 ▼</span>
+          <span id="historyLessBtn" style="font-size:11px;color:#1677ff;cursor:pointer;display:none;" onclick="toggleCalcHistory()">收起 ▲</span>
+          <span id="historyClearBtn" style="font-size:11px;color:#999;cursor:pointer;" onclick="clearCalcHistory()">清空</span>
+        </div>
+        <div id="batchHistory" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
+        <input id="batchCalcFormula" placeholder="如 价格*2 或 round(价格*税率,2)" style="flex:1;padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:14px;" onkeydown="if(event.key==='Enter')execBatchCalc()">
+        <button class="btn btn-secondary btn-sm" onclick="openFormulaHelp()">?</button>
+        <button class="btn btn-primary" onclick="execBatchCalc()">计算</button>
+      </div>
+      <div id="batchCalcResults" style="max-height:40vh;overflow-y:auto;"></div>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-secondary" onclick="document.getElementById('batchCalcModal').classList.remove('show')">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 预设编辑弹窗 ============ -->
+<div class="modal-mask" id="presetEditorModal">
+  <div class="modal modal-md">
+    <div class="modal-hdr">
+      <h3 id="presetEditorTitle">编辑预设</h3>
+      <button class="close-x" onclick="document.getElementById('presetEditorModal').classList.remove('show')">×</button>
+    </div>
+    <div class="modal-body">
+      <div style="margin-bottom:12px;">
+        <label style="display:block;font-size:13px;color:#555;margin-bottom:4px;">预设名称</label>
+        <input id="presetEditorName" placeholder="如：毛利计算、8折、税额" style="width:100%;padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:14px;box-sizing:border-box;">
+      </div>
+      <div style="margin-bottom:12px;">
+        <label style="display:block;font-size:13px;color:#555;margin-bottom:4px;">公式表达式</label>
+        <textarea id="presetEditorFormula" placeholder="如 价格*2 或 round(价格*税率,2)" rows="3" style="width:100%;padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:14px;box-sizing:border-box;resize:vertical;"></textarea>
+      </div>
+      <div style="font-size:12px;color:#888;">
+        💡 支持 + - * / () 和 round()、abs()、ceil()、floor() 函数。<span style="color:#1677ff;cursor:pointer;" onclick="openFormulaHelp()">查看帮助</span>
+      </div>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-secondary" onclick="document.getElementById('presetEditorModal').classList.remove('show')">取消</button>
+      <button class="btn btn-primary" onclick="savePresetEditor()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 历史备份弹窗 ============ -->
+<div class="modal-mask" id="historyBackupModal">
+  <div class="modal modal-lg">
+    <div class="modal-hdr">
+      <h3>📜 历史备份</h3>
+      <button class="close-x" onclick="document.getElementById('historyBackupModal').classList.remove('show')">×</button>
+    </div>
+    <div class="modal-body">
+      <!-- 标签页切换 -->
+      <div style="display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid #e8e8e8;">
+        <div class="backup-tab active" data-tab="shortTerm" onclick="switchBackupTab('shortTerm')" style="padding:8px 16px;cursor:pointer;font-size:14px;border-bottom:2px solid #1a73e8;margin-bottom:-2px;color:#1a73e8;font-weight:500;">🔄 短期备份</div>
+        <div class="backup-tab" data-tab="longTerm" onclick="switchBackupTab('longTerm')" style="padding:8px 16px;cursor:pointer;font-size:14px;color:#555;">📅 长期备份</div>
+        <div class="backup-tab" data-tab="history" onclick="switchBackupTab('history')" style="padding:8px 16px;cursor:pointer;font-size:14px;color:#555;">👣 操作历史</div>
+      </div>
+      <div id="backupList" style="max-height:50vh;overflow-y:auto;"></div>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-secondary" onclick="document.getElementById('historyBackupModal').classList.remove('show')">关闭</button>
+    </div>
+  </div>
+</div>
+
+<script>
+    // ============ 常量与全局状态 ============
+    const DEFAULT_FIELDS = [
+      { key: 'orderNo',   label: '订单编号', type: 'text',     required: true,  builtin: true,  preset: true },
+      { key: 'content',   label: '订单内容', type: 'text',     required: true,  builtin: false, preset: true },
+      { key: 'spec',      label: '规格',     type: 'text',     required: false, builtin: false, preset: true },
+      { key: 'customer',  label: '下单者',   type: 'text',     required: true,  builtin: false, preset: true },
+      { key: 'address',   label: '地址',     type: 'textarea', required: false, builtin: false, preset: true },
+      { key: 'price',     label: '价格',     type: 'number',   required: true,  builtin: false, preset: true },
+      { key: 'status',    label: '状态',     type: 'select',   required: false, builtin: false, preset: true, options: [
+        { value: 'pending',    label: '待处理' },
+        { value: 'processing', label: '进行中' },
+        { value: 'completed',  label: '已完成' },
+        { value: 'cancelled',  label: '已取消' }
+      ]},
+      { key: 'createdAt', label: '创建时间', type: 'datetime', required: false, builtin: true,  preset: true, system: true }
+    ];
+    const CORE_FIELDS = ['orderNo', 'createdAt']; // 仅这两个不可删除
+    const STORAGE_KEY = 'orderManager_v3';
+    const SYNC_GIST_FILENAME = 'order-manager-data.json';
+
+    const DEFAULT_STATS = [
+      { id: 'orders', label: '订单总数', type: 'count', field: '', icon: '📋', color: 'blue' },
+      { id: 'total',  label: '总金额',   type: 'sum',   field: 'price', icon: '💰', color: 'green' },
+      { id: 'pending',label: '待处理',   type: 'count_filtered', field: 'status', filterValue: 'pending', icon: '⏳', color: 'orange' }
+    ];
+    let statsConfig = JSON.parse(JSON.stringify(DEFAULT_STATS));
+
+    let fieldsConfig = JSON.parse(JSON.stringify(DEFAULT_FIELDS));
+    let fieldDefaults = {}; // key -> [value1, value2, ...]
+    let orders = [];
+    let editingId = null;
+    let syncToken = '';
+    let syncGistId = '';
+
+    // 行内编辑状态
+    let currentInlineFieldKey = null;
+    let currentInlineOrderId = null;
+
+    // 撤销 / 重做栈（最多各 100 条）
+    const UNDO_LIMIT = 100;
+    const undoStack = []; // [{snapshot, action}]
+    const redoStack = []; // [{snapshot, action}]
+    let insideUndoRedo = false; // 标记当前是否在执行 undo/redo（避免写入 undo 栈）
+
+    // ============ IndexedDB 备份系统 ============
+    const BACKUP_DB_NAME = 'OrderManagerBackupDB';
+    const BACKUP_DB_VERSION = 1;
+    const BACKUP_STORES = ['shortTerm', 'longTerm', 'history']; // 短期/长期/操作历史
+    const BACKUP_LIMITS = { shortTerm: 10, longTerm: 10, history: 100 };
+    let backupDB = null;
+    let lastHistorySnapshot = null; // 用于操作历史 diff
+    let lastShortBackupTime = 0;
+    let lastLongBackupDate = '';
+
+    // IndexedDB 初始化
+    function initBackupDB() {
+      return new Promise((resolve, reject) => {
+        if (!window.indexedDB) { resolve(null); return; }
+        if (backupDB) { resolve(backupDB); return; }
+        const req = indexedDB.open(BACKUP_DB_NAME, BACKUP_DB_VERSION);
+        req.onupgradeneeded = function(e) {
+          const db = e.target.result;
+          BACKUP_STORES.forEach(store => {
+            if (!db.objectStoreNames.contains(store)) {
+              const os = db.createObjectStore(store, { keyPath: 'id', autoIncrement: true });
+              os.createIndex('timestamp', 'timestamp', { unique: false });
+            }
+          });
+        };
+        req.onsuccess = function(e) { backupDB = e.target.result; resolve(backupDB); };
+        req.onerror = function(e) { resolve(null); };
+      });
+    }
+
+    // 添加一条备份
+    function addBackup(storeName, data, label) {
+      if (!backupDB) return Promise.resolve();
+      return new Promise((resolve) => {
+        try {
+          const tx = backupDB.transaction(storeName, 'readwrite');
+          const store = tx.objectStore(storeName);
+          const countReq = store.count();
+          countReq.onsuccess = function() {
+            const count = countReq.result;
+            // 如果超限，先删最旧的
+            if (count >= BACKUP_LIMITS[storeName]) {
+              // 用游标删最旧的
+              const cursorReq = store.openCursor();
+              cursorReq.onsuccess = function(e2) {
+                const cursor = e2.target.result;
+                if (cursor) {
+                  store.delete(cursor.primaryKey);
+                  // 继续添加
+                  store.add({
+                    timestamp: Date.now(),
+                    label: label || '',
+                    orderCount: (data.orders || []).length,
+                    data: data
+                  });
+                }
+              };
+            } else {
+              store.add({
+                timestamp: Date.now(),
+                label: label || '',
+                orderCount: (data.orders || []).length,
+                data: data
+              });
+            }
+          };
+          tx.oncomplete = function() { resolve(); };
+          tx.onerror = function() { resolve(); };
+        } catch(e) { resolve(); }
+      });
+    }
+
+    // 获取所有备份（按时间倒序）
+    function getAllBackups(storeName) {
+      if (!backupDB) return Promise.resolve([]);
+      return new Promise((resolve) => {
+        try {
+          const tx = backupDB.transaction(storeName, 'readonly');
+          const store = tx.objectStore(storeName);
+          const req = store.getAll();
+          req.onsuccess = function(e) {
+            const arr = e.target.result || [];
+            arr.sort((a, b) => b.timestamp - a.timestamp);
+            resolve(arr);
+          };
+          req.onerror = function() { resolve([]); };
+        } catch(e) { resolve([]); }
+      });
+    }
+
+    // 清空某个 store
+    function clearBackups(storeName) {
+      if (!backupDB) return Promise.resolve();
+      return new Promise((resolve) => {
+        try {
+          const tx = backupDB.transaction(storeName, 'readwrite');
+          tx.objectStore(storeName).clear();
+          tx.oncomplete = function() { resolve(); };
+          tx.onerror = function() { resolve(); };
+        } catch(e) { resolve(); }
+      });
+    }
+
+    // 获取当前完整数据快照
+    function getCurrentSnapshot() {
+      return {
+        fieldsConfig: JSON.parse(JSON.stringify(fieldsConfig)),
+        fieldDefaults: JSON.parse(JSON.stringify(fieldDefaults)),
+        orders: JSON.parse(JSON.stringify(orders)),
+        statsConfig: JSON.parse(JSON.stringify(statsConfig)),
+        savedAt: new Date().toISOString()
+      };
+    }
+
+    // 保存操作历史
+    function saveHistorySnapshot(action) {
+      if (!backupDB) return;
+      const snapshot = getCurrentSnapshot();
+      addBackup('history', snapshot, action || '操作').then(() => {
+        lastHistorySnapshot = snapshot;
+      });
+    }
+
+    // 定时备份调度
+    function scheduleAutoBackup() {
+      // 短期：每20分钟
+      setInterval(() => {
+        tryDoShortBackup();
+      }, 20 * 60 * 1000);
+      // 页面可见时也检查一次
+      document.addEventListener('visibilitychange', function() {
+        if (!document.hidden) { tryDoShortBackup(); tryDoLongBackup(); }
+      });
+      // 启动后30秒检查一次长期备份
+      setTimeout(() => { tryDoLongBackup(); }, 30000);
+    }
+
+    function tryDoShortBackup() {
+      const now = Date.now();
+      if (now - lastShortBackupTime < 19 * 60 * 1000) return; // 至少间隔19分钟
+      lastShortBackupTime = now;
+      const snapshot = getCurrentSnapshot();
+      const timeStr = new Date().toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+      addBackup('shortTerm', snapshot, '自动备份 ' + timeStr);
+    }
+
+    function tryDoLongBackup() {
+      const today = new Date().toLocaleDateString('zh-CN');
+      if (today === lastLongBackupDate) return;
+      lastLongBackupDate = today;
+      const snapshot = getCurrentSnapshot();
+      addBackup('longTerm', snapshot, '每日备份 ' + today);
+    }
+
+    // 恢复备份
+    function restoreBackup(storeName, backupId) {
+      if (!backupDB) return Promise.resolve(false);
+      return new Promise((resolve) => {
+        try {
+          const tx = backupDB.transaction(storeName, 'readonly');
+          const store = tx.objectStore(storeName);
+          const req = store.get(backupId);
+          req.onsuccess = function(e) {
+            const record = e.target.result;
+            if (record && record.data) {
+              const d = record.data;
+              if (d.fieldsConfig) fieldsConfig = d.fieldsConfig;
+              if (d.fieldDefaults) fieldDefaults = d.fieldDefaults;
+              if (d.orders) orders = d.orders;
+              if (d.statsConfig) statsConfig = d.statsConfig;
+              saveData();
+              render();
+              resolve(true);
+            } else {
+              resolve(false);
+            }
+          };
+          req.onerror = function() { resolve(false); };
+        } catch(e) { resolve(false); }
+      });
+    }
+    let managingDefaultsKey = null;
+    let managingOptionsKey = null;
+    let tempOptionsBuffer = [];
+
+    // 拖拽状态
+    let dragSrcIndex = null;
+
+    // 当前备份标签页
+    let currentBackupTab = 'shortTerm';
+    // 内联确认状态（避免在 modal 内使用浏览器原生 confirm/alert 导致滚动崩溃）
+    let pendingBackupAction = null; // { type: 'restore'|'clear', storeName, id? }
+
+    // 历史备份弹窗
+    function openHistoryBackup() {
+      currentBackupTab = 'shortTerm';
+      pendingBackupAction = null; // 打开时清除上次的待确认状态
+      document.querySelectorAll('.backup-tab').forEach(t => {
+        const active = t.dataset.tab === 'shortTerm';
+        t.style.borderBottom = active ? '2px solid #1a73e8' : 'none';
+        t.style.color = active ? '#1a73e8' : '#555';
+        t.style.fontWeight = active ? '500' : 'normal';
+        t.style.marginBottom = active ? '-2px' : '0';
+      });
+      renderBackupList('shortTerm');
+      document.getElementById('historyBackupModal').classList.add('show');
+    }
+    function switchBackupTab(tab) {
+      currentBackupTab = tab;
+      pendingBackupAction = null; // 切换标签时取消待确认
+      document.querySelectorAll('.backup-tab').forEach(t => {
+        const active = t.dataset.tab === tab;
+        t.style.borderBottom = active ? '2px solid #1a73e8' : 'none';
+        t.style.color = active ? '#1a73e8' : '#555';
+        t.style.fontWeight = active ? '500' : 'normal';
+        t.style.marginBottom = active ? '-2px' : '0';
+      });
+      renderBackupList(tab);
+    }
+    function renderBackupList(storeName) {
+      const el = document.getElementById('backupList');
+      if (!el) return;
+      el.innerHTML = '<div style="text-align:center;color:#999;padding:20px;">加载中...</div>';
+      getAllBackups(storeName).then(list => {
+        if (!backupDB) {
+          el.innerHTML = '<div style="text-align:center;color:#999;padding:20px;">当前浏览器不支持 IndexedDB，无法使用备份功能。<br>建议使用 Chrome / Safari / Edge 等现代浏览器。</div>';
+          return;
+        }
+        if (list.length === 0) {
+          const hints = {
+            shortTerm: '暂无短期备份。系统每 20 分钟自动备份一次。',
+            longTerm: '暂无长期备份。系统每天自动备份一次。',
+            history: '暂无操作历史。每次增删改订单时会自动记录。'
+          };
+          el.innerHTML = '<div style="text-align:center;color:#999;padding:20px;">' + (hints[storeName] || '暂无备份') + '</div>';
+          return;
+        }
+        const limit = BACKUP_LIMITS[storeName];
+        let html = '<div style="font-size:12px;color:#888;margin-bottom:8px;">共 ' + list.length + ' 条（最多保留 ' + limit + ' 条）</div>';
+        html += '<div style="display:flex;flex-direction:column;gap:8px;">';
+        list.forEach(item => {
+          const time = new Date(item.timestamp).toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+          const label = escapeHtml(item.label || '');
+          const count = item.orderCount || 0;
+          const isPendingRestore = pendingBackupAction && pendingBackupAction.type === 'restore'
+            && pendingBackupAction.storeName === storeName && pendingBackupAction.id === item.id;
+          let btns;
+          if (isPendingRestore) {
+            btns = '<div class="backup-confirm-row">' +
+              '<span class="backup-warn">覆盖当前数据？</span>' +
+              '<button class="btn btn-danger btn-sm" onclick="doRestoreBackup(\'' + storeName + '\', ' + item.id + ')">确认恢复</button>' +
+              '<button class="btn btn-secondary btn-sm" onclick="cancelBackupAction()">取消</button>' +
+            '</div>';
+          } else {
+            btns = '<button class="btn btn-primary btn-sm" onclick="askRestoreBackup(\'' + storeName + '\', ' + item.id + ')">恢复</button>';
+          }
+          html += '<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#f9f9f9;border:1px solid #e8e8e8;border-radius:6px;' + (isPendingRestore ? 'border-color:#cf1322;background:#fff5f5;"' : '"') + '>' +
+            '<div style="flex:1;">' +
+              '<div style="font-size:13px;font-weight:500;color:#333;">' + label + '</div>' +
+              '<div style="font-size:11px;color:#999;margin-top:2px;">' + time + ' · ' + count + ' 条订单</div>' +
+            '</div>' +
+            btns +
+          '</div>';
+        });
+        html += '</div>';
+        // 底部清空按钮
+        const isPendingClear = pendingBackupAction && pendingBackupAction.type === 'clear' && pendingBackupAction.storeName === storeName;
+        html += '<div style="margin-top:12px;padding-top:10px;border-top:1px dashed #e8e8e8;">';
+        if (isPendingClear) {
+          html += '<div class="backup-confirm-row">' +
+            '<span class="backup-warn">将永久删除此分类全部备份，不可撤销！</span>' +
+            '<button class="btn btn-danger btn-sm" onclick="doClearBackups(\'' + storeName + '\')">确认清空</button>' +
+            '<button class="btn btn-secondary btn-sm" onclick="cancelBackupAction()">取消</button>' +
+          '</div>';
+        } else {
+          html += '<button class="btn btn-danger btn-sm" onclick="askClearBackups(\'' + storeName + '\')">清空此分类的全部备份</button>';
+        }
+        html += '</div>';
+        el.innerHTML = html;
+      });
+    }
+    // 内联确认操作（pendingBackupAction 已在上方声明）
+    function askRestoreBackup(storeName, backupId) {
+      pendingBackupAction = { type: 'restore', storeName: storeName, id: backupId };
+      renderBackupList(storeName);
+    }
+    function askClearBackups(storeName) {
+      pendingBackupAction = { type: 'clear', storeName: storeName };
+      renderBackupList(storeName);
+    }
+    function cancelBackupAction() {
+      const sn = pendingBackupAction ? pendingBackupAction.storeName : currentBackupTab;
+      pendingBackupAction = null;
+      renderBackupList(sn);
+    }
+    function doRestoreBackup(storeName, backupId) {
+      pendingBackupAction = null;
+      restoreBackup(storeName, backupId).then(ok => {
+        if (ok) {
+          showToast('✅ 恢复成功！当前数据已更新为该备份的内容。');
+          document.getElementById('historyBackupModal').classList.remove('show');
+        } else {
+          showToast('❌ 恢复失败，请重试');
+          renderBackupList(storeName);
+        }
+      });
+    }
+    function doClearBackups(storeName) {
+      pendingBackupAction = null;
+      clearBackups(storeName).then(() => {
+        showToast('已清空该分类的全部备份');
+        renderBackupList(storeName);
+      });
+    }
+    // 轻量 toast 提示（替代 alert）
+    let toastTimer = null;
+    function showToast(msg) {
+      const el = document.getElementById('toastTip');
+      if (!el) return;
+      el.innerText = msg;
+      el.classList.add('show');
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => { el.classList.remove('show'); }, 2600);
+    }
+
+    // 批量选择状态
+    const selectedOrders = new Set();
+
+    // 批量计算器预设和历史
+    let calcPresets = JSON.parse(localStorage.getItem('batchCalcPresets') || 'null') || [
+      { label: '价格合计', formula: '价格' },
+      { label: '2倍价格', formula: '价格*2' },
+      { label: '8折', formula: 'round(价格*0.8, 2)' },
+      { label: '半价', formula: '价格*0.5' },
+      { label: '加100', formula: '价格+100' }
+    ];
+    let calcHistory = JSON.parse(localStorage.getItem('batchCalcHistory') || 'null') || [];
+
+    // ============ 工具函数 ============
+    function formatDate(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      if (isNaN(d)) return '';
+      const pad = n => n < 10 ? '0' + n : '' + n;
+      return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    }
+    function escapeHtml(text) {
+      if (text === null || text === undefined) return '';
+      return String(text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+    function escapeAttr(text) {
+      if (text === null || text === undefined) return '';
+      return String(text).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    // ============ 通用显示值 ============
+    function getDisplayText(field, value) {
+      if (value === undefined || value === null || value === '') return '';
+      if (field.type === 'imageText') {
+        const txt = (typeof value === 'object') ? (value.text || '') : value;
+        return String(txt);
+      }
+      if (field.type === 'select' && field.options) {
+        const opt = field.options.find(o => o.value === value);
+        return opt ? opt.label : String(value);
+      }
+      if (field.type === 'datetime') {
+        return formatDate(value);
+      }
+      return String(value);
+    }
+
+    // ============ 公式求值 ============
+    function evalFormula(field, order) {
+      if (!field || field.type !== 'formula' || !field.formula) return '';
+      try {
+        let expr = field.formula.trim();
+        // 同时支持英文名(key)和中文名(label)
+        const substitutions = {};
+        fieldsConfig.forEach(f => {
+          const v = order[f.key];
+          let numVal = 0;
+          if (v === null || v === undefined || v === '') numVal = 0;
+          else if (typeof v === 'number') numVal = v;
+          else numVal = parseFloat(String(v)) || 0;
+          if (f.key) substitutions[f.key] = '(' + numVal + ')';
+          if (f.label && f.label !== f.key) {
+            substitutions[f.label] = '(' + numVal + ')';
+          }
+        });
+        // 按长度从长到短排序，避免短的先被替换
+        const keys = Object.keys(substitutions).sort((a,b) => b.length - a.length);
+        for (const k of keys) {
+          if (/^[a-zA-Z_]/.test(k)) {
+            expr = expr.replace(new RegExp('\\b' + k + '\\b', 'g'), substitutions[k]);
+          } else {
+            expr = expr.split(k).join(substitutions[k]);
+          }
+        }
+        // 处理 round(), abs(), ceil(), floor() 函数
+        const funcStack = [];
+        let funcIdx = 0;
+        // 先提取所有函数调用（从内到外）
+        while (true) {
+          // 查找最内层的 func(...) 不含其他函数
+          const funcMatch = expr.match(/(round|abs|ceil|floor)\(([^()]*)\)/);
+          if (!funcMatch) break;
+          const funcName = funcMatch[1];
+          const inner = funcMatch[2];
+          const placeholder = '__FUNC_' + funcIdx + '__';
+          funcStack.push({ func: funcName, args: inner });
+          expr = expr.substring(0, funcMatch.index) + placeholder + expr.substring(funcMatch.index + funcMatch[0].length);
+          funcIdx++;
+        }
+        // 清除剩余不允许的字符（保留占位符中的下划线和数字）
+        expr = expr.replace(/[^0-9+\-*/().\s_]/g, '').trim();
+        // 恢复函数占位符
+        for (let i = funcStack.length - 1; i >= 0; i--) {
+          const item = funcStack[i];
+          const placeholder = '__FUNC_' + i + '__';
+          // 计算内部表达式
+          let args = item.args;
+          // 对内部表达式做同样的字段替换（如果有的话）
+          for (const k of keys) {
+            if (/^[a-zA-Z_]/.test(k)) {
+              args = args.replace(new RegExp('\\b' + k + '\\b', 'g'), substitutions[k]);
+            } else {
+              args = args.split(k).join(substitutions[k]);
+            }
+          }
+          // 恢复内部的函数占位符
+          for (let j = funcStack.length - 1; j >= 0; j--) {
+            const ph = '__FUNC_' + j + '__';
+            args = args.split(ph).join('0');
+          }
+          // 计算
+          args = args.replace(/[^0-9+\-*/().\s_]/g, '').trim();
+          const argParts = splitArgs(args);
+          const computedArgs = argParts.map(a => {
+            a = a.trim();
+            if (!a) return '0';
+            if (/^[+\-*/]/.test(a)) a = '1' + a;
+            a = a.replace(/[+\-*/]+$/, '');
+            if (!a) return '0';
+            try {
+              return String(Function('"use strict";return (' + a + ')')());
+            } catch(e) { return '0'; }
+          });
+          let funcResult;
+          if (item.func === 'round') {
+            const num = parseFloat(computedArgs[0]) || 0;
+            const decimals = parseInt(computedArgs[1]) || 0;
+            const factor = Math.pow(10, decimals);
+            funcResult = String(Math.round(num * factor) / factor);
+          } else if (item.func === 'abs') {
+            funcResult = String(Math.abs(parseFloat(computedArgs[0]) || 0));
+          } else if (item.func === 'ceil') {
+            funcResult = String(Math.ceil(parseFloat(computedArgs[0]) || 0));
+          } else if (item.func === 'floor') {
+            funcResult = String(Math.floor(parseFloat(computedArgs[0]) || 0));
+          }
+          expr = expr.split(placeholder).join('(' + funcResult + ')');
+        }
+        if (!expr) return '';
+        if (/^[+\-*/]/.test(expr)) {
+          expr = '1' + expr;
+        }
+        expr = expr.replace(/[+\-*/]+$/, '');
+        if (!expr) return '';
+        const result = Function('"use strict";return (' + expr + ')')();
+        if (result === undefined || result === null || isNaN(result) || !isFinite(result)) return '';
+        return Math.round(result * 100) / 100;
+      } catch (e) {
+        return '';
+      }
+    }
+    // 辅助函数：拆分函数参数（处理嵌套括号）
+    function splitArgs(str) {
+      const result = [];
+      let depth = 0;
+      let current = '';
+      for (let i = 0; i < str.length; i++) {
+        const ch = str[i];
+        if (ch === '(') depth++;
+        else if (ch === ')') depth--;
+        else if (ch === ',' && depth === 0) {
+          result.push(current);
+          current = '';
+          continue;
+        }
+        current += ch;
+      }
+      if (current) result.push(current);
+      return result.length > 0 ? result : [str];
+    }
+
+    // ============ 统计栏渲染 ============
+    function renderStats() {
+      const bar = document.getElementById('statsBar');
+      if (!bar) return;
+      if (statsConfig.length === 0) {
+        bar.innerHTML = '';
+        return;
+      }
+      const list = getFilteredOrders();
+      let html = '';
+      statsConfig.forEach(s => {
+        let val = '';
+        if (s.type === 'count') {
+          val = list.length;
+        } else if (s.type === 'count_filtered') {
+          val = list.filter(o => String(o[s.field]) === String(s.filterValue)).length;
+        } else if (s.type === 'sum') {
+          const f = fieldsConfig.find(x => x.key === s.field);
+          if (f) {
+            let sum = 0;
+            list.forEach(o => {
+              let v = o[s.field];
+              if (f.type === 'formula') {
+                const r = evalFormula(f, o);
+                if (r !== '') sum += Number(r) || 0;
+              } else {
+                if (v !== '' && v !== null && v !== undefined) sum += Number(v) || 0;
+              }
+            });
+            val = (Math.round(sum * 100) / 100);
+            val = '¥ ' + val;
+          } else {
+            val = '¥ 0';
+          }
+        } else if (s.type === 'avg') {
+          const f = fieldsConfig.find(x => x.key === s.field);
+          if (f && list.length > 0) {
+            let sum = 0, cnt = 0;
+            list.forEach(o => {
+              let v;
+              if (f.type === 'formula') {
+                const r = evalFormula(f, o);
+                if (r !== '') { v = Number(r); } else { return; }
+              } else {
+                v = Number(o[s.field]);
+              }
+              if (!isNaN(v) && isFinite(v)) { sum += v; cnt++; }
+            });
+            val = cnt > 0 ? ('¥ ' + Math.round(sum / cnt * 100) / 100) : '¥ 0';
+          } else {
+            val = '¥ 0';
+          }
+        } else if (s.type === 'sum_status') {
+          const f = fieldsConfig.find(x => x.key === s.field);
+          if (f) {
+            let sum = 0;
+            list.forEach(o => {
+              let v = o[s.field];
+              if (f.type === 'formula') {
+                const r = evalFormula(f, o);
+                if (r !== '') sum += Number(r) || 0;
+              } else {
+                if (v !== '' && v !== null && v !== undefined) sum += Number(v) || 0;
+              }
+            });
+            val = Math.round(sum * 100) / 100;
+          } else {
+            val = 0;
+          }
+        }
+        html += '<div class="stat-card">' +
+          '<div class="stat-icon ' + (s.color || 'blue') + '">' + (s.icon || '📊') + '</div>' +
+          '<div class="stat-info"><div class="stat-val">' + escapeHtml(String(val)) + '</div><div class="stat-label">' + escapeHtml(s.label) + '</div></div>' +
+          '</div>';
+      });
+      bar.innerHTML = html;
+    }
+
+    // ============ 加载 / 保存数据 ============
+    function loadData() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const data = JSON.parse(raw);
+          if (data.fieldsConfig && data.fieldsConfig.length > 0) {
+            fieldsConfig = mergeFieldsFromStorage(data.fieldsConfig);
+          }
+          if (data.fieldDefaults && typeof data.fieldDefaults === 'object') {
+            fieldDefaults = data.fieldDefaults;
+          }
+          orders = Array.isArray(data.orders) ? data.orders : [];
+          syncToken = data.syncToken || '';
+          syncGistId = data.syncGistId || '';
+          if (data.statsConfig && Array.isArray(data.statsConfig)) {
+            statsConfig = data.statsConfig;
+          }
+        } else {
+          // 从旧版本迁移
+          for (const oldKey of ['orderManager_v2', 'orderManager_v1', 'orderManager']) {
+            const r = localStorage.getItem(oldKey);
+            if (r) {
+              try {
+                const d = JSON.parse(r);
+                if (Array.isArray(d.orders)) orders = d.orders;
+              } catch(e){}
+            }
+          }
+        }
+      } catch (e) { console.error(e); }
+      // 加载完成后记录初始快照作为撤销基线（首次操作才能回退到加载状态）
+      lastHistorySnapshot = getCurrentSnapshot();
+    }
+
+    function mergeFieldsFromStorage(saved) {
+      const result = JSON.parse(JSON.stringify(saved));
+      CORE_FIELDS.forEach(key => {
+        if (!result.find(f => f.key === key)) {
+          const def = DEFAULT_FIELDS.find(f => f.key === key);
+          if (def) result.unshift(JSON.parse(JSON.stringify(def)));
+        }
+      });
+      return result;
+    }
+
+    function saveData(action) {
+      // 撤销栈：推入"变更前"快照（lastHistorySnapshot 是上一次保存完的状态）
+      if (action && !insideUndoRedo && lastHistorySnapshot) {
+        undoStack.push({ snapshot: lastHistorySnapshot, action: action });
+        if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+        redoStack.length = 0; // 任何新操作都清空 redo 栈
+        updateUndoRedoButtons();
+      }
+      const payload = {
+        fieldsConfig: fieldsConfig,
+        fieldDefaults: fieldDefaults,
+        orders: orders,
+        syncToken: syncToken,
+        syncGistId: syncGistId,
+        statsConfig: statsConfig,
+        savedAt: new Date().toISOString()
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      // 记录操作历史到 IndexedDB
+      if (action) {
+        saveHistorySnapshot(action);
+      }
+    }
+
+    function updateUndoRedoButtons() {
+      const ub = document.getElementById('undoBtn');
+      const rb = document.getElementById('redoBtn');
+      if (ub) ub.disabled = undoStack.length === 0;
+      if (rb) rb.disabled = redoStack.length === 0;
+      if (ub) ub.title = undoStack.length ? '上一步：' + undoStack[undoStack.length - 1].action + ' (Ctrl+Z)' : '上一步 (Ctrl+Z)';
+      if (rb) rb.title = redoStack.length ? '下一步：' + redoStack[redoStack.length - 1].action + ' (Ctrl+Y)' : '下一步 (Ctrl+Y)';
+    }
+
+    function applySnapshot(snap) {
+      if (!snap) return;
+      if (snap.fieldsConfig) fieldsConfig = snap.fieldsConfig;
+      if (snap.fieldDefaults) fieldDefaults = snap.fieldDefaults;
+      if (snap.orders) orders = snap.orders;
+      if (snap.statsConfig) statsConfig = snap.statsConfig;
+    }
+
+    function undoAction() {
+      if (undoStack.length === 0) return;
+      insideUndoRedo = true;
+      try {
+        const beforeCurrent = getCurrentSnapshot(); // 当前状态（撤销后要变成"可重做"的状态）
+        const item = undoStack.pop();
+        redoStack.push({ snapshot: beforeCurrent, action: item.action });
+        if (redoStack.length > UNDO_LIMIT) redoStack.shift();
+        applySnapshot(item.snapshot);
+        // 同时把 lastHistorySnapshot 也更新为应用后的状态
+        lastHistorySnapshot = getCurrentSnapshot();
+        const payload = {
+          fieldsConfig: fieldsConfig, fieldDefaults: fieldDefaults, orders: orders,
+          syncToken: syncToken, syncGistId: syncGistId, statsConfig: statsConfig,
+          savedAt: new Date().toISOString()
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+        render();
+        showToast('↶ 已撤销：' + item.action);
+      } finally {
+        insideUndoRedo = false;
+        updateUndoRedoButtons();
+      }
+    }
+
+    function redoAction() {
+      if (redoStack.length === 0) return;
+      insideUndoRedo = true;
+      try {
+        const beforeCurrent = getCurrentSnapshot();
+        const item = redoStack.pop();
+        undoStack.push({ snapshot: beforeCurrent, action: item.action });
+        if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+        applySnapshot(item.snapshot);
+        lastHistorySnapshot = getCurrentSnapshot();
+        const payload = {
+          fieldsConfig: fieldsConfig, fieldDefaults: fieldDefaults, orders: orders,
+          syncToken: syncToken, syncGistId: syncGistId, statsConfig: statsConfig,
+          savedAt: new Date().toISOString()
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+        render();
+        showToast('↷ 已重做：' + item.action);
+      } finally {
+        insideUndoRedo = false;
+        updateUndoRedoButtons();
+      }
+    }
+
+    // ============ 渲染表格/卡片 ============
+    function render() {
+      renderStats();
+      renderStatusFilter();
+      renderTableHead();
+      renderTbody();
+      renderCards();
+      updateBatchBar();
+    }
+
+    function getFilteredOrders() {
+      const kw = document.getElementById('searchInput').value.trim().toLowerCase();
+      const sf = document.getElementById('statusFilter').value;
+      return orders.filter(o => {
+        if (sf) {
+          if (o.status !== sf) return false;
+        }
+        if (kw) {
+          const haystack = fieldsConfig.map(f => getDisplayText(f, o[f.key])).join(' ').toLowerCase();
+          if (!haystack.includes(kw)) return false;
+        }
+        return true;
+      }).sort((a,b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    }
+
+    function renderStatusFilter() {
+      const sel = document.getElementById('statusFilter');
+      const current = sel.value;
+      const sf = fieldsConfig.find(f => f.key === 'status');
+      let opts = '<option value="">全部状态</option>';
+      if (sf && sf.options) {
+        sf.options.forEach(o => {
+          opts += '<option value="' + escapeAttr(o.value) + '">' + escapeHtml(o.label) + '</option>';
+        });
+      }
+      sel.innerHTML = opts;
+      sel.value = current;
+    }
+
+    function renderTableHead() {
+      const visibleFields = fieldsConfig.filter(f => !f.hidden);
+      const filteredList = getFilteredOrders();
+      const allChecked = filteredList.length > 0 && filteredList.every(o => selectedOrders.has(o.id));
+      const tr = '<tr>' +
+        '<th class="checkbox-cell"><input type="checkbox" id="selectAllCb" ' + (allChecked ? 'checked' : '') + ' onchange="toggleSelectAll(this.checked)"></th>' +
+        visibleFields.map(f => {
+          const label = escapeHtml(f.label);
+          if (f.key === 'orderNo') return '<th style="min-width:150px">' + label + '</th>';
+          if (f.type === 'textarea') return '<th style="min-width:200px">' + label + '</th>';
+          if (f.type === 'imageText') return '<th style="min-width:180px">' + label + '</th>';
+          return '<th>' + label + '</th>';
+        }).join('') +
+        '<th class="actions-cell">操作</th></tr>';
+      document.getElementById('tableHead').innerHTML = tr;
+    }
+
+    function getStatusTagClass(value) {
+      switch (value) {
+        case 'pending':    return 'tag-pending';
+        case 'processing': return 'tag-processing';
+        case 'completed':  return 'tag-completed';
+        case 'cancelled':  return 'tag-cancelled';
+        default:           return 'tag-default';
+      }
+    }
+
+    function renderCellValue(field, order) {
+      if (field.type === 'formula') {
+        const result = evalFormula(field, order);
+        if (result === '' || result === null || result === undefined) return '<span style="color:#bbb">—</span>';
+        return '<span style="font-weight:500;color:#722ed1;">¥ ' + escapeHtml(String(result)) + '</span>';
+      }
+      const val = order[field.key];
+      if (val === null || val === undefined || val === '') return '<span style="color:#bbb">—</span>';
+      if (field.key === 'status') {
+        const display = getDisplayText(field, val);
+        return '<span class="tag ' + getStatusTagClass(val) + '">' + escapeHtml(display) + '</span>';
+      }
+      if (field.type === 'imageText') {
+        const img = (typeof val === 'object') ? (val.image || '') : '';
+        const txt = (typeof val === 'object') ? (val.text || '') : val;
+        let inner;
+        if (img) {
+          inner = '<img src="' + escapeAttr(img) + '" alt="" onclick="event.stopPropagation();showImgPreview(\''+escapeAttr(img)+'\')">';
+        } else {
+          inner = '<div class="thumb">📷</div>';
+        }
+        return '<div class="img-txt">' + inner + '<span>' + escapeHtml(txt || '') + '</span></div>';
+      }
+      if (field.type === 'textarea') {
+        return '<span style="white-space:pre-wrap">' + escapeHtml(val) + '</span>';
+      }
+      if (field.type === 'number') {
+        return '<span style="font-weight:500">¥ ' + escapeHtml(String(val)) + '</span>';
+      }
+      return escapeHtml(getDisplayText(field, val));
+    }
+
+    function renderTbody() {
+      const list = getFilteredOrders();
+      const tbody = document.getElementById('ordersTbody');
+      const visibleFields = fieldsConfig.filter(f => !f.hidden);
+      if (list.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="' + (visibleFields.length + 2) + '" style="text-align:center;padding:40px;color:#999;">暂无订单，点击右上角 + 新增订单</td></tr>';
+        return;
+      }
+      let html = '';
+      list.forEach(o => {
+        const checked = selectedOrders.has(o.id) ? 'checked' : '';
+        html += '<tr>';
+        html += '<td class="checkbox-cell"><input type="checkbox" ' + checked + ' onchange="toggleSelectOrder(\'' + escapeAttr(o.id) + '\', this.checked)"></td>';
+        visibleFields.forEach(f => {
+          const cellHtml = renderCellValue(f, o);
+          const isFormula = f.type === 'formula';
+          const clickable = isFormula ? '' : 'clickable';
+          const onclick = isFormula ? '' : 'onclick="startInlineEdit(this, \'' + escapeAttr(o.id) + '\', \'' + escapeAttr(f.key) + '\')"';
+          html += '<td class="' + clickable + '" ' + onclick + '>' + cellHtml + '</td>';
+        });
+        html += '<td class="actions-cell">' +
+          '<button class="btn btn-secondary btn-sm" onclick="editOrder(\'' + escapeAttr(o.id) + '\')">编辑</button>' +
+          '<button class="btn btn-danger btn-sm" onclick="deleteOrder(\'' + escapeAttr(o.id) + '\')">删除</button>' +
+          '</td>';
+        html += '</tr>';
+      });
+      tbody.innerHTML = html;
+    }
+
+    function renderCards() {
+      const list = getFilteredOrders();
+      const container = document.getElementById('cardList');
+      const visibleFields = fieldsConfig.filter(f => !f.hidden);
+      if (list.length === 0) {
+        container.innerHTML = '<div class="card" style="text-align:center;color:#999;padding:30px;">暂无订单，点击右上角 + 新增订单</div>';
+        return;
+      }
+      let html = '';
+      list.forEach(o => {
+        const checked = selectedOrders.has(o.id) ? 'checked' : '';
+        html += '<div class="card">';
+        html += '<div class="card-checkbox"><input type="checkbox" ' + checked + ' onchange="toggleSelectOrder(\'' + escapeAttr(o.id) + '\', this.checked)"> 选择此订单</div>';
+        html += '<div class="card-header">';
+        html += '<div class="card-title">' + escapeHtml(getDisplayText(fieldsConfig[0] || {label:'订单'}, o[fieldsConfig[0] ? fieldsConfig[0].key : 'orderNo']) || '订单') + '</div>';
+        html += '<div class="card-actions">';
+        html += '<button class="btn btn-secondary btn-sm" onclick="editOrder(\'' + escapeAttr(o.id) + '\')">编辑</button>';
+        html += '<button class="btn btn-danger btn-sm" onclick="deleteOrder(\'' + escapeAttr(o.id) + '\')">删除</button>';
+        html += '</div></div>';
+        visibleFields.forEach(f => {
+          const label = escapeHtml(f.label);
+          const valHtml = renderCellValue(f, o);
+          const isFormula = f.type === 'formula';
+          const clickable = isFormula ? '' : 'card-value';
+          const onclick = isFormula ? '' : 'onclick="startInlineEdit(this, \'' + escapeAttr(o.id) + '\', \'' + escapeAttr(f.key) + '\')"';
+          html += '<div class="card-row">' +
+            '<div class="card-label">' + label + '</div>' +
+            '<div class="' + clickable + '" ' + onclick + '>' + valHtml + '</div>' +
+            '</div>';
+        });
+        html += '</div>';
+      });
+      container.innerHTML = html;
+    }
+
+    function showImgPreview(src) {
+      const w = window.open('', '_blank');
+      w.document.write('<title>图片预览</title><body style="margin:0;background:#000;display:flex;align-items:center;justify-content:center;min-height:100vh;"><img src="' + escapeAttr(src) + '" style="max-width:100%;max-height:100vh"></body>');
+    }
+
+    // ============ 新增 / 编辑订单表单 ============
+    function openAddModal() {
+      editingId = null;
+      document.getElementById('orderModalTitle').innerText = '新增订单';
+      const form = document.getElementById('orderFormBody');
+      form.innerHTML = buildFormHtml('add_', {});
+      document.getElementById('orderModal').classList.add('show');
+    }
+
+    function editOrder(id) {
+      const o = orders.find(x => x.id === id);
+      if (!o) return;
+      editingId = id;
+      document.getElementById('orderModalTitle').innerText = '编辑订单';
+      const form = document.getElementById('orderFormBody');
+      form.innerHTML = buildFormHtml('edit_', o);
+      document.getElementById('orderModal').classList.add('show');
+    }
+
+    function closeModal(id) {
+      document.getElementById(id).classList.remove('show');
+    }
+
+    function buildFormHtml(idPrefix, data) {
+      let html = '';
+      fieldsConfig.forEach(f => {
+        if (f.hidden) return;
+        const label = escapeHtml(f.label);
+        const value = data[f.key] !== undefined ? data[f.key] : '';
+        if (f.system) {
+          if (value) {
+            html += '<div class="form-row"><label>' + label + '</label><div class="ctl" style="padding-top:7px;color:#666;">' + escapeHtml(formatDate(value)) + '</div></div>';
+          }
+          return;
+        }
+        if (f.type === 'formula') {
+          const result = evalFormula(f, data);
+          html += '<div class="form-row"><label>' + label + ' <span class="formula-field-badge">公式</span></label><div class="ctl" style="padding-top:7px;color:#722ed1;font-weight:500;">' + (result !== '' ? '¥ ' + escapeHtml(String(result)) : '—') + '</div></div>';
+          return;
+        }
+        const reqHtml = f.required ? ' class="req"' : '';
+        const ctl = renderFormControl(f, value, idPrefix);
+        html += '<div class="form-row"><label' + reqHtml + '>' + label + '</label><div class="ctl">' + ctl + '</div></div>';
+      });
+      return html;
+    }
+
+    function renderFormControl(field, val, idPrefix) {
+      if (field.type === 'textarea') {
+        return '<textarea class="form-textarea" data-field="' + escapeAttr(field.key) + '">' + escapeHtml(val || '') + '</textarea>';
+      }
+      if (field.type === 'number') {
+        return '<input type="number" class="form-input" data-field="' + escapeAttr(field.key) + '" value="' + escapeAttr(val == null ? '' : val) + '" step="any">';
+      }
+      if (field.type === 'datetime') {
+        let dstr = '';
+        if (val) {
+          const d = new Date(val);
+          if (!isNaN(d)) {
+            const pad = n => n < 10 ? '0' + n : '' + n;
+            dstr = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+          }
+        }
+        return '<input type="datetime-local" class="form-input" data-field="' + escapeAttr(field.key) + '" value="' + escapeAttr(dstr) + '">';
+      }
+      if (field.type === 'select') {
+        if (!field.options || field.options.length === 0) {
+          return '<input type="text" class="form-input" data-field="' + escapeAttr(field.key) + '" value="' + escapeAttr(val == null ? '' : val) + '">';
+        }
+        let opts = '<option value="">-- 请选择 --</option>';
+        field.options.forEach(o => {
+          const sel = (val === o.value) ? ' selected' : '';
+          opts += '<option value="' + escapeAttr(o.value) + '"' + sel + '>' + escapeHtml(o.label) + '</option>';
+        });
+        return '<select class="form-select" data-field="' + escapeAttr(field.key) + '">' + opts + '</select>';
+      }
+      if (field.type === 'imageText') {
+        const img = (typeof val === 'object') ? (val.image || '') : '';
+        const txt = (typeof val === 'object') ? (val.text || '') : (typeof val === 'string' ? val : '');
+        let imgHtml;
+        if (img) { imgHtml = '<img src="' + escapeAttr(img) + '" alt="">'; }
+        else { imgHtml = '<div class="add-plus">+</div>'; }
+        let clearBtnHtml = '';
+        if (img) {
+          clearBtnHtml = '<button type="button" class="clear-btn" onclick="event.preventDefault();clearImageField(\'' + escapeAttr(idPrefix + field.key) + '\')">×</button>';
+        }
+        const fileInputHtml = '<input type="file" accept="image/*" data-field-img="' + escapeAttr(field.key) + '" data-upload-for="' + escapeAttr(idPrefix + field.key) + '" style="display:none;" onchange="onUploadImage(event, \'' + escapeAttr(idPrefix + field.key) + '\')">';
+        const hiddenValue = img ? JSON.stringify({image: img, text: txt}) : (txt || '');
+        return '' +
+          '<div class="image-uploader">' +
+            '<label class="preview">' +
+              imgHtml +
+              clearBtnHtml +
+              fileInputHtml +
+            '</label>' +
+            '<div class="text-side">' +
+              '<input type="text" class="form-input" data-field-txt="' + escapeAttr(field.key) + '" placeholder="图片说明文字..." value="' + escapeAttr(txt) + '">' +
+              '<input type="hidden" data-field="' + escapeAttr(field.key) + '" data-field-hidden="' + escapeAttr(idPrefix + field.key) + '" value="' + escapeAttr(hiddenValue) + '">' +
+            '</div>' +
+          '</div>';
+      }
+      return '<input type="text" class="form-input" data-field="' + escapeAttr(field.key) + '" value="' + escapeAttr((typeof val === 'object' && val) ? (val.text || '') : (val == null ? '' : val)) + '">';
+    }
+
+    function clearImageField(idPrefixPlusKey) {
+      const container = event.target.closest('.image-uploader');
+      if (!container) return;
+      const label = container.querySelector('.preview');
+      const imgEl = label.querySelector('img');
+      const fileInput = label.querySelector('input[type=file]');
+      const hiddenInput = container.querySelector('[data-field-hidden="' + idPrefixPlusKey + '"]');
+      const txtInput = container.querySelector('[data-field-txt]');
+      fileInput.value = '';
+      if (imgEl) imgEl.remove();
+      if (!label.querySelector('.add-plus')) {
+        const plus = document.createElement('div');
+        plus.className = 'add-plus';
+        plus.textContent = '+';
+        label.insertBefore(plus, label.querySelector('.clear-btn'));
+      }
+      const clearBtn = label.querySelector('.clear-btn');
+      if (clearBtn) clearBtn.remove();
+      const txt = txtInput ? txtInput.value : '';
+      if (hiddenInput) hiddenInput.value = txt || '';
+    }
+
+    function onUploadImage(event, idPrefixPlusKey) {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      const container = event.target.closest('.image-uploader');
+      if (!container) return;
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const b64 = e.target.result;
+        const label = container.querySelector('.preview');
+        let imgEl = label.querySelector('img');
+        if (!imgEl) {
+          imgEl = document.createElement('img');
+          const plus = label.querySelector('.add-plus');
+          if (plus) plus.remove();
+          const clearBtnRef = label.querySelector('.clear-btn');
+          label.insertBefore(imgEl, clearBtnRef || label.firstChild);
+        }
+        imgEl.src = b64;
+        if (!label.querySelector('.clear-btn')) {
+          const cb = document.createElement('button');
+          cb.type = 'button';
+          cb.className = 'clear-btn';
+          cb.textContent = '×';
+          cb.onclick = function(ev) { ev.preventDefault(); clearImageField(idPrefixPlusKey); };
+          label.appendChild(cb);
+        }
+        const hiddenInput = container.querySelector('[data-field-hidden="' + idPrefixPlusKey + '"]');
+        const txtInput = container.querySelector('[data-field-txt]');
+        const txt = txtInput ? txtInput.value : '';
+        if (hiddenInput) {
+          hiddenInput.value = JSON.stringify({image: b64, text: txt});
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function collectFormData(idPrefix) {
+      const body = document.getElementById('orderFormBody');
+      const obj = {};
+      fieldsConfig.forEach(f => {
+        if (f.system) return;
+        if (f.type === 'formula') return;
+        if (f.type === 'imageText') {
+          const hidden = body.querySelector('[data-field-hidden="' + escapeAttr(idPrefix + f.key) + '"]');
+          const txtInput = body.querySelector('[data-field-txt="' + escapeAttr(f.key) + '"]');
+          let value = null;
+          if (hidden && hidden.value) {
+            try {
+              value = JSON.parse(hidden.value);
+              if (typeof value === 'string') {
+                value = { image: '', text: value };
+              }
+            } catch(e) {
+              value = { image: '', text: hidden.value };
+            }
+          } else {
+            value = { image: '', text: txtInput ? txtInput.value : '' };
+          }
+          // 同步文本字段变更
+          if (txtInput && typeof value === 'object') {
+            value.text = txtInput.value;
+            if (value.image || value.text) {
+              obj[f.key] = value;
+            } else {
+              obj[f.key] = '';
+            }
+          } else {
+            obj[f.key] = value;
+          }
+          return;
+        }
+        const el = body.querySelector('[data-field="' + f.key + '"]');
+        if (!el) return;
+        let v = el.value;
+        if (f.type === 'number') {
+          v = (v === '' || v === null || v === undefined) ? '' : (Number(v) || 0);
+        }
+        if (f.type === 'datetime' && v) {
+          v = new Date(v).toISOString();
+        }
+        obj[f.key] = v;
+      });
+      return obj;
+    }
+
+    function saveOrder() {
+      const data = collectFormData(editingId ? 'edit_' : 'add_');
+      // 隐藏字段处理：从已有订单或默认值中获取
+      fieldsConfig.forEach(f => {
+        if (!f.hidden || f.system || f.type === 'formula') return;
+        if (data[f.key] !== undefined) return;
+        if (editingId) {
+          const existing = orders.find(x => x.id === editingId);
+          if (existing && existing[f.key] !== undefined) {
+            data[f.key] = existing[f.key];
+            return;
+          }
+        }
+        // 从默认值获取第一个
+        if (fieldDefaults[f.key] && fieldDefaults[f.key].length > 0) {
+          data[f.key] = fieldDefaults[f.key][0];
+        } else if (f.type === 'number') {
+          data[f.key] = 0;
+        } else {
+          data[f.key] = '';
+        }
+      });
+      // 必填校验
+      for (const f of fieldsConfig) {
+        if (f.required && !f.system) {
+          const v = data[f.key];
+          let empty = (v === '' || v === null || v === undefined);
+          if (!empty && typeof v === 'object' && f.type === 'imageText') {
+            empty = !v.image && !v.text;
+          }
+          if (empty) {
+            alert('请填写【' + f.label + '】');
+            return;
+          }
+        }
+      }
+      if (editingId) {
+        const idx = orders.findIndex(x => x.id === editingId);
+        if (idx >= 0) {
+          const merged = Object.assign({}, orders[idx], data);
+          // 默认值收集（不覆盖已存在的）
+          pushToDefaults(merged);
+          orders[idx] = merged;
+        }
+      } else {
+        const newOrder = Object.assign({
+          id: 'ord_' + Date.now() + '_' + Math.floor(Math.random()*1000),
+          createdAt: new Date().toISOString(),
+          orderNo: data.orderNo || ('NO' + Date.now())
+        }, data);
+        pushToDefaults(newOrder);
+        orders.unshift(newOrder);
+      }
+      saveData(editingId ? '编辑订单' : '新增订单');
+      render();
+      closeModal('orderModal');
+    }
+
+    function pushToDefaults(orderData) {
+      fieldsConfig.forEach(f => {
+        if (f.system) return;
+        if (f.type === 'formula') return;
+        if (f.type === 'textarea' || f.type === 'datetime') return;
+        if (f.type === 'select') return; // select 不走默认 chips，用专门 options
+        let raw = orderData[f.key];
+        if (raw === '' || raw === null || raw === undefined) return;
+        let v;
+        if (f.type === 'imageText') {
+          v = (typeof raw === 'object') ? (raw.text || '') : raw;
+          if (!v) return;
+        } else {
+          v = String(raw);
+        }
+        if (!fieldDefaults[f.key]) fieldDefaults[f.key] = [];
+        const arr = fieldDefaults[f.key];
+        if (!arr.includes(v)) {
+          arr.unshift(v);
+          if (arr.length > 20) arr.length = 20;
+        } else {
+          // 提到最前
+          const i = arr.indexOf(v);
+          if (i > 0) { arr.splice(i,1); arr.unshift(v); }
+        }
+      });
+    }
+
+    function deleteOrder(id) {
+      if (!confirm('确认删除该订单？此操作不可撤销。')) return;
+      orders = orders.filter(o => o.id !== id);
+      selectedOrders.delete(id);
+      saveData('删除订单');
+      render();
+    }
+
+    // ============ 批量操作 ============
+    function toggleSelectOrder(id, checked) {
+      if (checked) selectedOrders.add(id);
+      else selectedOrders.delete(id);
+      updateBatchBar();
+      // 更新表头全选状态
+      const filteredList = getFilteredOrders();
+      const allChecked = filteredList.length > 0 && filteredList.every(o => selectedOrders.has(o.id));
+      const selAll = document.getElementById('selectAllCb');
+      if (selAll) selAll.checked = allChecked;
+    }
+    function toggleSelectAll(checked) {
+      const filteredList = getFilteredOrders();
+      if (checked) {
+        filteredList.forEach(o => selectedOrders.add(o.id));
+      } else {
+        filteredList.forEach(o => selectedOrders.delete(o.id));
+      }
+      renderTbody();
+      renderCards();
+      updateBatchBar();
+    }
+    function selectAllVisible() {
+      const filteredList = getFilteredOrders();
+      filteredList.forEach(o => selectedOrders.add(o.id));
+      render();
+    }
+    function clearSelection() {
+      selectedOrders.clear();
+      render();
+    }
+    function updateBatchBar() {
+      const bar = document.getElementById('batchBar');
+      const countEl = document.getElementById('batchCount');
+      if (!bar || !countEl) return;
+      const count = selectedOrders.size;
+      if (count > 0) {
+        bar.style.display = 'flex';
+        countEl.innerText = '已选择 ' + count + ' 项';
+      } else {
+        bar.style.display = 'none';
+      }
+    }
+    function getSelectedOrders() {
+      return orders.filter(o => selectedOrders.has(o.id));
+    }
+    function batchDelete() {
+      const count = selectedOrders.size;
+      if (count === 0) return;
+      if (!confirm('确认删除选中的 ' + count + ' 个订单？此操作不可撤销。')) return;
+      orders = orders.filter(o => !selectedOrders.has(o.id));
+      selectedOrders.clear();
+      saveData('批量删除 ' + count + ' 个订单');
+      render();
+    }
+    function openBatchCalc() {
+      const count = selectedOrders.size;
+      if (count === 0) return;
+      document.getElementById('batchCalcCount').innerText = count;
+      document.getElementById('batchCalcResults').innerHTML = '';
+      const historyEl = document.getElementById('batchHistory');
+      if (historyEl) historyEl.dataset.expanded = 'false';
+      renderCalcPresets();
+      renderCalcHistory();
+      document.getElementById('batchCalcModal').classList.add('show');
+      setTimeout(() => { document.getElementById('batchCalcFormula').focus(); }, 50);
+    }
+    function renderCalcPresets() {
+      const el = document.getElementById('batchPresets');
+      if (!el) return;
+      let html = '';
+      if (calcPresets.length === 0) {
+        html = '<span style="font-size:11px;color:#bbb;">暂无预设，点击右上角"+ 新增预设"添加</span>';
+      } else {
+        html = calcPresets.map((p, i) =>
+          '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:#e6f7ff;border:1px solid #91d5ff;border-radius:12px;cursor:pointer;font-size:12px;color:#1677ff;" title="' + escapeAttr(p.formula) + '" onclick="useCalcPreset(' + i + ')" oncontextmenu="event.preventDefault();openPresetEditor(' + i + ');">' +
+            escapeHtml(p.label) +
+            '<span style="color:#bbb;font-size:10px;margin-left:2px;" onclick="event.stopPropagation();openPresetEditor(' + i + ')">✎</span>' +
+            '<span style="color:#bbb;font-size:10px;" onclick="event.stopPropagation();deleteCalcPreset(' + i + ')">✕</span>' +
+          '</span>'
+        ).join('');
+      }
+      el.innerHTML = html;
+    }
+    function openPresetEditor(i) {
+      const isNew = (i === -1);
+      const modal = document.getElementById('presetEditorModal');
+      const title = document.getElementById('presetEditorTitle');
+      const nameInput = document.getElementById('presetEditorName');
+      const formulaInput = document.getElementById('presetEditorFormula');
+      if (isNew) {
+        title.innerText = '新增预设';
+        const currentFormula = document.getElementById('batchCalcFormula').value.trim();
+        nameInput.value = '';
+        formulaInput.value = currentFormula;
+      } else {
+        const p = calcPresets[i];
+        if (!p) return;
+        title.innerText = '编辑预设';
+        nameInput.value = p.label;
+        formulaInput.value = p.formula;
+      }
+      modal.dataset.editIndex = i;
+      modal.classList.add('show');
+      setTimeout(() => { nameInput.focus(); nameInput.select(); }, 50);
+    }
+    function savePresetEditor() {
+      const modal = document.getElementById('presetEditorModal');
+      const i = parseInt(modal.dataset.editIndex);
+      const label = document.getElementById('presetEditorName').value.trim();
+      const formula = document.getElementById('presetEditorFormula').value.trim();
+      if (!label || !formula) return;
+      if (i === -1) {
+        calcPresets.push({ label: label, formula: formula });
+      } else {
+        calcPresets[i] = { label: label, formula: formula };
+      }
+      localStorage.setItem('batchCalcPresets', JSON.stringify(calcPresets));
+      renderCalcPresets();
+      modal.classList.remove('show');
+    }
+    function useCalcPreset(i) {
+      const p = calcPresets[i];
+      if (!p) return;
+      document.getElementById('batchCalcFormula').value = p.formula;
+      execBatchCalc();
+    }
+    function deleteCalcPreset(i) {
+      calcPresets.splice(i, 1);
+      localStorage.setItem('batchCalcPresets', JSON.stringify(calcPresets));
+      renderCalcPresets();
+    }
+    function renderCalcHistory() {
+      const el = document.getElementById('batchHistory');
+      const moreBtn = document.getElementById('historyMoreBtn');
+      const lessBtn = document.getElementById('historyLessBtn');
+      const clearBtn = document.getElementById('historyClearBtn');
+      if (!el) return;
+      if (calcHistory.length === 0) {
+        el.innerHTML = '<span style="font-size:11px;color:#bbb;">暂无历史</span>';
+        moreBtn.style.display = 'none';
+        lessBtn.style.display = 'none';
+        clearBtn.style.display = 'none';
+        return;
+      }
+      clearBtn.style.display = 'inline';
+      const expanded = el.dataset.expanded === 'true';
+      if (expanded) {
+        lessBtn.style.display = 'inline';
+        moreBtn.style.display = 'none';
+        el.innerHTML = calcHistory.map((h, i) =>
+          '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:#fff7e6;border:1px solid #ffd591;border-radius:12px;cursor:pointer;font-size:12px;color:#d46b08;" title="' + escapeAttr(h) + '" onclick="useCalcHistory(' + i + ')">' +
+            escapeHtml(h.length > 20 ? h.substring(0, 20) + '…' : h) +
+          '</span>'
+        ).join('');
+      } else {
+        moreBtn.style.display = calcHistory.length > 1 ? 'inline' : 'none';
+        const latest = calcHistory[0];
+        el.innerHTML = '<span style="display:inline-flex;align-items:center;gap:6px;padding:5px 12px;background:#fff7e6;border:1px solid #ffd591;border-radius:14px;cursor:pointer;font-size:13px;color:#d46b08;font-weight:500;" title="' + escapeAttr(latest) + '" onclick="useCalcHistory(0)">' +
+          '<span style="color:#fa8c16;font-size:14px;">🕐</span>' +
+          escapeHtml(latest.length > 24 ? latest.substring(0, 24) + '…' : latest) +
+        '</span>';
+      }
+    }
+    function useCalcHistory(i) {
+      const formula = calcHistory[i];
+      if (!formula) return;
+      document.getElementById('batchCalcFormula').value = formula;
+      execBatchCalc();
+    }
+    function toggleCalcHistory() {
+      const el = document.getElementById('batchHistory');
+      if (!el) return;
+      const expanded = el.dataset.expanded === 'true';
+      el.dataset.expanded = expanded ? 'false' : 'true';
+      renderCalcHistory();
+    }
+    function clearCalcHistory() {
+      calcHistory = [];
+      localStorage.setItem('batchCalcHistory', JSON.stringify(calcHistory));
+      const el = document.getElementById('batchHistory');
+      if (el) el.dataset.expanded = 'false';
+      renderCalcHistory();
+    }
+    function saveCalcHistory(formula) {
+      // 去重：如果已存在则移到最前
+      const idx = calcHistory.indexOf(formula);
+      if (idx >= 0) calcHistory.splice(idx, 1);
+      calcHistory.unshift(formula);
+      if (calcHistory.length > 10) calcHistory.length = 10;
+      localStorage.setItem('batchCalcHistory', JSON.stringify(calcHistory));
+    }
+    function execBatchCalc() {
+      const formulaStr = document.getElementById('batchCalcFormula').value.trim();
+      if (!formulaStr) return;
+      const selectedList = getSelectedOrders();
+      if (selectedList.length === 0) return;
+      saveCalcHistory(formulaStr);
+      renderCalcHistory();
+      // 构造一个临时 formula 字段来复用 evalFormula
+      const tempField = { type: 'formula', formula: formulaStr };
+      let html = '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
+      html += '<tr style="background:#f5f5f5;"><th style="padding:6px 10px;text-align:left;border:1px solid #e8e8e8;">订单</th><th style="padding:6px 10px;text-align:right;border:1px solid #e8e8e8;">计算结果</th></tr>';
+      let sum = 0;
+      let validCount = 0;
+      const results = [];
+      selectedList.forEach(o => {
+        const result = evalFormula(tempField, o);
+        results.push(result);
+        const orderLabel = escapeHtml(getDisplayText(fieldsConfig[0] || {label:'订单'}, o[fieldsConfig[0] ? fieldsConfig[0].key : 'orderNo']) || o.id);
+        let displayResult;
+        if (result === '' || result === null || result === undefined) {
+          displayResult = '<span style="color:#bbb;">—</span>';
+        } else {
+          sum += Number(result) || 0;
+          validCount++;
+          displayResult = '<b style="color:#722ed1;">¥ ' + escapeHtml(String(result)) + '</b>';
+        }
+        html += '<tr><td style="padding:6px 10px;border:1px solid #e8e8e8;">' + orderLabel + '</td>' +
+          '<td style="padding:6px 10px;border:1px solid #e8e8e8;text-align:right;">' + displayResult + '</td></tr>';
+      });
+      html += '</table>';
+      const validResults = results.filter(r => r !== '' && r !== null && r !== undefined).map(r => Number(r));
+      const avg = validCount > 0 ? (Math.round(sum / validCount * 100) / 100) : 0;
+      const maxVal = validResults.length > 0 ? Math.max(...validResults) : 0;
+      const minVal = validResults.length > 0 ? Math.min(...validResults) : 0;
+      html += '<div style="margin-top:12px;padding:12px;background:#f6ffed;border:1px solid #b7eb8f;border-radius:6px;font-size:14px;">' +
+        '<div style="margin-bottom:4px;">📊 <b>汇总</b>（共 ' + validCount + ' 个有效结果）</div>' +
+        '<div style="display:flex;gap:24px;flex-wrap:wrap;">' +
+        '<span>求和：<b style="color:#52c41a;">¥ ' + (Math.round(sum * 100) / 100) + '</b></span>' +
+        '<span>平均：<b style="color:#1677ff;">¥ ' + avg + '</b></span>' +
+        '<span>最大：<b style="color:#fa8c16;">¥ ' + maxVal + '</b></span>' +
+        '<span>最小：<b style="color:#fa541c;">¥ ' + minVal + '</b></span>' +
+        '</div></div>';
+      document.getElementById('batchCalcResults').innerHTML = html;
+    }
+
+    // ============ 行内编辑器 ============
+    function startInlineEdit(cellEl, orderId, fieldKey) {
+      const field = fieldsConfig.find(f => f.key === fieldKey);
+      if (!field) return;
+      if (field.system) return;
+      if (field.type === 'formula') return;
+      const order = orders.find(o => o.id === orderId);
+      if (!order) return;
+      currentInlineFieldKey = fieldKey;
+      currentInlineOrderId = orderId;
+
+      const val = order[fieldKey];
+      const editor = document.getElementById('inlineEditor');
+      editor.style.display = 'block';
+      let editorHtml = '';
+      editorHtml += renderInlineEditor(field, val);
+      editorHtml += '<div class="ie-actions">';
+      editorHtml += '<button class="btn btn-secondary btn-sm" onclick="closeInlineEditor()">取消</button>';
+      editorHtml += '<button class="btn btn-primary btn-sm" onclick="saveInlineEdit(event)">✓ 确定</button>';
+      editorHtml += '</div>';
+      editor.innerHTML = editorHtml;
+
+      // 定位编辑器
+      const rect = cellEl.getBoundingClientRect();
+      const scrollLeft = window.scrollX || document.documentElement.scrollLeft;
+      const scrollTop  = window.scrollY || document.documentElement.scrollTop;
+      document.getElementById('inlineMask').classList.add('show');
+      const ew = editor.offsetWidth;
+      const eh = editor.offsetHeight;
+      let left = rect.left + scrollLeft;
+      let top  = rect.bottom + scrollTop + 4;
+      if (left + ew > scrollLeft + window.innerWidth - 8) {
+        left = scrollLeft + window.innerWidth - ew - 8;
+      }
+      if (left < scrollLeft + 4) left = scrollLeft + 4;
+      if (top + eh > scrollTop + window.innerHeight + window.scrollY - 8) {
+        top = rect.top + scrollTop - eh - 4;
+      }
+      editor.style.left = left + 'px';
+      editor.style.top  = top + 'px';
+
+      // 自动聚焦
+      setTimeout(() => {
+        const first = editor.querySelector('.ie-input, .ie-select, .ie-textarea, input[type=file]');
+        if (first && first.focus) first.focus();
+        if (first && first.select) first.select();
+      }, 10);
+    }
+
+    function renderInlineEditor(field, val) {
+      // 默认 chips 区域
+      const defaults = fieldDefaults[field.key] || [];
+      let html = '<div style="margin-bottom:6px;font-weight:500;color:#555;font-size:13px;">编辑「' + escapeHtml(field.label) + '」</div>';
+
+      if (field.type === 'imageText') {
+        const img = (typeof val === 'object') ? (val.image || '') : '';
+        const txt = (typeof val === 'object') ? (val.text || '') : (typeof val === 'string' ? val : '');
+        let imgHtml;
+        if (img) imgHtml = '<img src="' + escapeAttr(img) + '" alt="">';
+        else imgHtml = '<div class="add-plus">+</div>';
+        const clearBtnHtml = img ? ('<button type="button" class="clear-btn" id="ieClearBtn" onclick="ieClearImage()">×</button>') : '';
+        html += '' +
+          '<div class="image-uploader" style="margin-bottom:8px;">' +
+            '<label class="preview">' + imgHtml + clearBtnHtml +
+              '<input type="file" accept="image/*" id="ieFileInput" style="display:none;" onchange="ieFileOnChange(event)">' +
+            '</label>' +
+            '<div class="text-side">' +
+              '<input type="text" class="form-input" id="ieTxtInput" placeholder="图片说明文字..." value="' + escapeAttr(txt) + '">' +
+            '</div>' +
+          '</div>';
+        html += '<input type="hidden" id="ieImgB64" value="' + escapeAttr(img) + '">';
+      } else if (field.type === 'select') {
+        if (!field.options || field.options.length === 0) {
+          html += '<input class="ie-input" id="ieInput" value="' + escapeAttr(val || '') + '">';
+        } else {
+          let opts = '';
+          field.options.forEach(o => {
+            opts += '<option value="' + escapeAttr(o.value) + '"' + (val === o.value ? ' selected' : '') + '>' + escapeHtml(o.label) + '</option>';
+          });
+          html += '<select class="ie-select" id="ieInput">' + opts + '</select>';
+        }
+      } else if (field.type === 'textarea') {
+        html += '<textarea class="ie-textarea" id="ieInput">' + escapeHtml(val || '') + '</textarea>';
+      } else if (field.type === 'number') {
+        html += '<input class="ie-input" type="number" id="ieInput" value="' + escapeAttr(val == null ? '' : val) + '" step="any">';
+      } else if (field.type === 'datetime') {
+        let dstr = '';
+        if (val) {
+          const d = new Date(val);
+          if (!isNaN(d)) {
+            const pad = n => n < 10 ? '0' + n : '' + n;
+            dstr = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+          }
+        }
+        html += '<input class="ie-input" type="datetime-local" id="ieInput" value="' + escapeAttr(dstr) + '">';
+      } else {
+        // text
+        html += '<input class="ie-input" id="ieInput" value="' + escapeAttr(val == null ? '' : val) + '">';
+      }
+
+      // 默认 chips 仅适用于 text / number / imageText-text
+      if (field.type === 'text' || field.type === 'number' || field.type === 'imageText') {
+        html += '<div class="chips-list">';
+        defaults.forEach(v => {
+          html += '<div class="chip" onclick="ieUseDefault(\'' + escapeAttr(String(v).replace(/'/g,"\\'")) + '\')">' + escapeHtml(String(v)) + '</div>';
+        });
+        html += '<button class="chip-manage-btn" onclick="manageDefaultsClick(\'' + escapeAttr(field.key) + '\')">管理…</button>';
+        html += '</div>';
+      }
+      return html;
+    }
+
+    function ieFileOnChange(event) {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const b64 = e.target.result;
+        const uploader = document.querySelector('#inlineEditor .image-uploader');
+        const label = uploader.querySelector('.preview');
+        let imgEl = label.querySelector('img');
+        if (!imgEl) {
+          imgEl = document.createElement('img');
+          const plus = label.querySelector('.add-plus');
+          if (plus) plus.remove();
+          label.insertBefore(imgEl, label.querySelector('.clear-btn') || label.firstChild);
+        }
+        imgEl.src = b64;
+        if (!label.querySelector('.clear-btn')) {
+          const cb = document.createElement('button');
+          cb.type = 'button';
+          cb.className = 'clear-btn';
+          cb.textContent = '×';
+          cb.id = 'ieClearBtn';
+          cb.onclick = ieClearImage;
+          label.appendChild(cb);
+        }
+        document.getElementById('ieImgB64').value = b64;
+      };
+      reader.readAsDataURL(file);
+    }
+    function ieClearImage() {
+      const uploader = document.querySelector('#inlineEditor .image-uploader');
+      if (!uploader) return;
+      const label = uploader.querySelector('.preview');
+      const imgEl = label.querySelector('img');
+      const fileInput = label.querySelector('#ieFileInput');
+      if (imgEl) imgEl.remove();
+      if (!label.querySelector('.add-plus')) {
+        const plus = document.createElement('div');
+        plus.className = 'add-plus';
+        plus.textContent = '+';
+        label.insertBefore(plus, label.querySelector('.clear-btn'));
+      }
+      const cb = label.querySelector('.clear-btn');
+      if (cb) cb.remove();
+      if (fileInput) fileInput.value = '';
+      document.getElementById('ieImgB64').value = '';
+    }
+    function ieUseDefault(v) {
+      const txtInput = document.getElementById('ieTxtInput');
+      const mainInput = document.getElementById('ieInput');
+      if (txtInput) { txtInput.value = v; txtInput.focus(); }
+      if (mainInput) { mainInput.value = v; mainInput.focus(); }
+    }
+
+    function closeInlineEditor() {
+      document.getElementById('inlineEditor').style.display = 'none';
+      document.getElementById('inlineMask').classList.remove('show');
+      currentInlineFieldKey = null;
+      currentInlineOrderId = null;
+    }
+
+    function saveInlineEdit(ev) {
+      if (ev) {
+        ev.stopPropagation ? ev.stopPropagation() : (ev.cancelBubble = true);
+      }
+      const field = fieldsConfig.find(f => f.key === currentInlineFieldKey);
+      if (!field) return;
+      const order = orders.find(o => o.id === currentInlineOrderId);
+      if (!order) return;
+
+      let newVal;
+      if (field.type === 'imageText') {
+        const img = document.getElementById('ieImgB64').value;
+        const txt = document.getElementById('ieTxtInput').value;
+        newVal = (img || txt) ? { image: img, text: txt } : '';
+      } else if (field.type === 'number') {
+        const v = document.getElementById('ieInput').value;
+        newVal = (v === '' || v === null || v === undefined) ? '' : (Number(v) || 0);
+      } else if (field.type === 'datetime') {
+        const v = document.getElementById('ieInput').value;
+        newVal = v ? new Date(v).toISOString() : '';
+      } else if (field.type === 'select') {
+        newVal = document.getElementById('ieInput').value;
+      } else {
+        newVal = document.getElementById('ieInput').value;
+      }
+
+      // 必填校验
+      if (field.required) {
+        let empty = (newVal === '' || newVal === null || newVal === undefined);
+        if (!empty && typeof newVal === 'object' && field.type === 'imageText') {
+          empty = !newVal.image && !newVal.text;
+        }
+        if (empty) {
+          alert('【' + field.label + '】是必填项');
+          return;
+        }
+      }
+
+      order[field.key] = newVal;
+      pushToDefaults(order);
+      saveData('行内编辑: ' + field.label);
+      render();
+      closeInlineEditor();
+    }
+
+    // ============ 默认选项管理 ============
+    function manageDefaultsClick(fieldKey) {
+      managingDefaultsKey = fieldKey;
+      const f = fieldsConfig.find(x => x.key === fieldKey);
+      if (!f) return;
+      document.getElementById('defaultsModalTitle').innerText = '管理默认选项：' + f.label;
+      renderDefaultsList();
+      document.getElementById('defaultsModal').classList.add('show');
+      document.getElementById('newDefaultInput').value = '';
+      setTimeout(() => { document.getElementById('newDefaultInput').focus(); }, 50);
+    }
+    function closeDefaultsModal() {
+      document.getElementById('defaultsModal').classList.remove('show');
+      managingDefaultsKey = null;
+    }
+    function renderDefaultsList() {
+      const ul = document.getElementById('defaultsList');
+      const arr = fieldDefaults[managingDefaultsKey] || [];
+      if (arr.length === 0) {
+        ul.innerHTML = '<li class="empty-hint">暂无默认选项，输入下方添加</li>';
+        return;
+      }
+      let html = '';
+      arr.forEach((v, i) => {
+        html += '<li><div class="v">' + escapeHtml(String(v)) + '</div>' +
+          '<button class="btn btn-danger btn-sm" onclick="deleteDefaultOption(' + i + ')">删除</button></li>';
+      });
+      ul.innerHTML = html;
+    }
+    function saveDefaultOption() {
+      const inp = document.getElementById('newDefaultInput');
+      const v = inp.value.trim();
+      if (!v) return;
+      if (!fieldDefaults[managingDefaultsKey]) fieldDefaults[managingDefaultsKey] = [];
+      const arr = fieldDefaults[managingDefaultsKey];
+      if (!arr.includes(v)) arr.unshift(v);
+      saveData('添加默认选项');
+      inp.value = '';
+      renderDefaultsList();
+      inp.focus();
+    }
+    function deleteDefaultOption(idx) {
+      const arr = fieldDefaults[managingDefaultsKey] || [];
+      arr.splice(idx, 1);
+      saveData('删除默认选项');
+      renderDefaultsList();
+    }
+
+    // ============ select字段选项编辑 ============
+    function openOptionsModal(fieldKey) {
+      managingOptionsKey = fieldKey;
+      const f = fieldsConfig.find(x => x.key === fieldKey);
+      if (!f) return;
+      document.getElementById('optionsModalTitle').innerText = '编辑下拉选项：' + f.label;
+      tempOptionsBuffer = JSON.parse(JSON.stringify(f.options || []));
+      if (tempOptionsBuffer.length === 0) {
+        tempOptionsBuffer = [
+          { value: 'opt1', label: '选项1' },
+          { value: 'opt2', label: '选项2' }
+        ];
+      }
+      renderOptsList();
+      document.getElementById('optionsModal').classList.add('show');
+    }
+    function closeOptionsModal() {
+      document.getElementById('optionsModal').classList.remove('show');
+      managingOptionsKey = null;
+    }
+    function renderOptsList() {
+      const ul = document.getElementById('optsList');
+      if (tempOptionsBuffer.length === 0) {
+        ul.innerHTML = '<li class="empty-hint">暂无选项，点击下方添加</li>';
+        return;
+      }
+      let html = '';
+      tempOptionsBuffer.forEach((o, i) => {
+        html += '<li>' +
+          '<span>标识</span><input placeholder="value英文标识，如 pending" value="' + escapeAttr(o.value) + '" oninput="tempOptionsBuffer['+i+'].value=this.value">' +
+          '<span>显示</span><input placeholder="显示文本，如 待处理" value="' + escapeAttr(o.label) + '" oninput="tempOptionsBuffer['+i+'].label=this.value">' +
+          '<button class="btn btn-danger btn-sm" onclick="tempOptionsBuffer.splice('+i+',1);renderOptsList()">×</button>' +
+          '</li>';
+      });
+      ul.innerHTML = html;
+    }
+    function addOptionRow() {
+      const n = tempOptionsBuffer.length + 1;
+      tempOptionsBuffer.push({ value: 'opt' + n, label: '新选项' + n });
+      renderOptsList();
+    }
+    function saveOptionsConfig() {
+      // 校验 value 不为空、不重复
+      const map = {};
+      for (let i = 0; i < tempOptionsBuffer.length; i++) {
+        const o = tempOptionsBuffer[i];
+        if (!o.value || !o.label) {
+          alert('第 ' + (i+1) + ' 行：标识和显示文本都不能空');
+          return;
+        }
+        if (map[o.value]) {
+          alert('标识重复：' + o.value);
+          return;
+        }
+        map[o.value] = true;
+      }
+      const f = fieldsConfig.find(x => x.key === managingOptionsKey);
+      if (f) {
+        f.options = JSON.parse(JSON.stringify(tempOptionsBuffer));
+        if (f.type !== 'select') f.type = 'select';
+      }
+      saveData('修改下拉选项');
+      renderFieldsSettings();
+      renderStatusFilter();
+      closeOptionsModal();
+    }
+
+    // ============ 字段设置（列表、拖拽、新增、删除、编辑、保存） ============
+    function renderFieldsSettings() {
+      const ul = document.getElementById('fieldsList');
+      let html = '';
+      fieldsConfig.forEach((f, i) => {
+        html += '<li class="field-item" draggable="' + (f.builtin ? 'true' : 'true') + '" data-index="' + i + '"' +
+          ' ondragstart="onFieldDragStart(event,'+i+')"' +
+          ' ondragover="onFieldDragOver(event)" ondragleave="onFieldDragLeave(event)"' +
+          ' ondrop="onFieldDrop(event,'+i+')" ondragend="onFieldDragEnd(event)">';
+        html += '<span class="drag-handle" title="拖动调整顺序">⋮⋮</span>';
+        html += '<span class="f-label">';
+        if (!f.builtin || f.preset) {
+          html += '<input class="f-editable" value="' + escapeAttr(f.label) + '" oninput="updateFieldLabel('+i+', this.value)">';
+        } else {
+          html += escapeHtml(f.label);
+        }
+        html += '</span>';
+        html += '<span class="f-type">' + typeLabel(f.type) + '</span>';
+        if (f.builtin) {
+          html += '<span class="builtin-tag">内置不可删</span>';
+        }
+        html += '<div class="field-item-btns">';
+        if (!f.builtin) {
+          // 类型切换
+          html += '<select class="f-editable" onchange="updateFieldType('+i+', this.value)">';
+          html += '<option value="text"'     + (f.type==='text'?' selected':'')     + '>文本</option>';
+          html += '<option value="number"'   + (f.type==='number'?' selected':'')   + '>数字</option>';
+          html += '<option value="textarea"' + (f.type==='textarea'?' selected':'') + '>多行文本</option>';
+          html += '<option value="select"'   + (f.type==='select'?' selected':'')   + '>下拉</option>';
+          html += '<option value="imageText"'+ (f.type==='imageText'?' selected':'')+ '>图片+文本</option>';
+          html += '<option value="formula"'  + (f.type==='formula'?' selected':'')  + '>公式</option>';
+          html += '</select>';
+          // 必填
+          html += '<label style="display:flex;align-items:center;gap:4px;font-size:12px;">' +
+            '<input type="checkbox"' + (f.required ? ' checked' : '') + ' onchange="updateFieldRequired('+i+', this.checked)"> 必填' +
+            '</label>';
+          // 隐藏
+          html += '<label style="display:flex;align-items:center;gap:4px;font-size:12px;color:' + (f.hidden ? '#722ed1' : '#888') + ';">' +
+            '<input type="checkbox"' + (f.hidden ? ' checked' : '') + ' onchange="updateFieldHidden('+i+', this.checked)"> 隐藏' +
+            '</label>';
+          // 公式字段：显示公式表达式输入
+          if (f.type === 'formula') {
+            html += '<div class="formula-expr" style="margin-left:8px;display:flex;align-items:center;gap:6px;">' +
+              '<input class="f-editable" placeholder="如 价格*2 或 price*2" value="' + escapeAttr(f.formula || '') + '" oninput="updateFieldFormula('+i+', this.value)" style="flex:1;">' +
+              '<button class="btn btn-secondary btn-sm" onclick="openFormulaHelp()" title="公式帮助">?</button>' +
+              '</div>';
+          }
+          // 选项（select）
+          if (f.type !== 'formula') {
+            html += '<button class="btn btn-secondary btn-sm" onclick="openOptionsModal(\'' + escapeAttr(f.key) + '\')">选项</button>';
+          }
+          // 默认值管理（非textarea非select非datetime非formula）
+          if (f.type !== 'textarea' && f.type !== 'select' && f.type !== 'datetime' && f.type !== 'formula') {
+            html += '<button class="btn btn-secondary btn-sm" onclick="manageDefaultsClick(\'' + escapeAttr(f.key) + '\')">默认值</button>';
+          }
+          // 删除
+          html += '<button class="btn btn-danger btn-sm" onclick="deleteFieldItem('+i+')">删除</button>';
+        } else {
+          // 内置字段：允许修改标签（orderNo 可以改显示名），允许改位置（拖拽），但不能改类型/不能删
+          if (f.key === 'orderNo') {
+            html += '<button class="btn btn-secondary btn-sm" onclick="manageDefaultsClick(\'' + escapeAttr(f.key) + '\')">默认值</button>';
+          }
+          html += '<span style="font-size:12px;color:#888;">位置可调</span>';
+        }
+        html += '</div>';
+        html += '</li>';
+      });
+      ul.innerHTML = html;
+    }
+
+    function typeLabel(t) {
+      switch (t) {
+        case 'text':      return '文本';
+        case 'number':    return '数字';
+        case 'textarea':  return '多行';
+        case 'select':    return '下拉';
+        case 'imageText': return '图片+文本';
+        case 'datetime':  return '时间';
+        case 'formula':   return '公式';
+        default:          return t || '文本';
+      }
+    }
+
+    function updateFieldLabel(i, v) { fieldsConfig[i].label = v; }
+    function updateFieldFormula(i, v) { fieldsConfig[i].formula = v; }
+    function openFormulaHelp() {
+      const container = document.getElementById('formulaHelpFields');
+      if (!container) return;
+      const nonFormulaFields = fieldsConfig.filter(x => x.type !== 'formula');
+      let html = '';
+      nonFormulaFields.forEach(f => {
+        const typeLabel = { text:'文本', number:'数字', textarea:'多行', select:'下拉', imageText:'图片+文本', datetime:'时间' }[f.type] || f.type;
+        const badgeColor = f.type === 'number' || f.type === 'datetime' ? '#52c41a' : '#8c8c8c';
+        html += '<span style="display:inline-block;padding:3px 10px;background:#f5f5f5;border:1px solid #e8e8e8;border-radius:4px;margin:2px;font-size:12px;">' +
+          '<b style="color:#333;">' + escapeHtml(f.label) + '</b>' +
+          '<span style="color:#999;margin:0 4px;">/</span>' +
+          '<code style="color:#1677ff;font-size:11px;">' + escapeHtml(f.key) + '</code>' +
+          '<span style="color:' + badgeColor + ';margin-left:4px;font-size:11px;">' + typeLabel + '</span>' +
+          (f.hidden ? '<span style="color:#722ed1;margin-left:4px;font-size:11px;">(隐藏)</span>' : '') +
+          '</span>';
+      });
+      container.innerHTML = html || '<span style="color:#999;">暂无可用字段</span>';
+      document.getElementById('formulaHelpModal').classList.add('show');
+    }
+    function updateFieldType(i, v) {
+      fieldsConfig[i].type = v;
+      if (v === 'formula' && !fieldsConfig[i].formula) {
+        fieldsConfig[i].formula = '0';
+      }
+      if (v === 'select' && (!fieldsConfig[i].options || fieldsConfig[i].options.length === 0)) {
+        fieldsConfig[i].options = [
+          { value: 'opt1', label: '选项1' },
+          { value: 'opt2', label: '选项2' }
+        ];
+      }
+      renderFieldsSettings();
+    }
+    function updateFieldRequired(i, v) { fieldsConfig[i].required = v; }
+    function updateFieldHidden(i, v) { fieldsConfig[i].hidden = v; saveData('修改字段隐藏设置'); render(); }
+    function deleteFieldItem(i) {
+      if (fieldsConfig[i].builtin) return;
+      if (!confirm('删除字段「' + fieldsConfig[i].label + '」？现有订单数据中的该字段内容将保留但不再显示。')) return;
+      fieldsConfig.splice(i, 1);
+      renderFieldsSettings();
+    }
+    function addNewField() {
+      const label = document.getElementById('newFieldLabel').value.trim();
+      if (!label) { alert('请输入字段名'); return; }
+      const type = document.getElementById('newFieldType').value;
+      const req  = document.getElementById('newFieldRequired').checked;
+      let key = 'custom_' + Math.random().toString(36).slice(2, 8);
+      // 避免 key 重复
+      while (fieldsConfig.find(f => f.key === key)) {
+        key = 'custom_' + Math.random().toString(36).slice(2, 8);
+      }
+      const nf = { key: key, label: label, type: type, required: req, builtin: false, preset: false };
+      if (type === 'select') {
+        nf.options = [
+          { value: 'opt1', label: '选项1' },
+          { value: 'opt2', label: '选项2' }
+        ];
+      }
+      if (type === 'formula') {
+        nf.formula = '0';
+      }
+      fieldsConfig.push(nf);
+      document.getElementById('newFieldLabel').value = '';
+      document.getElementById('newFieldRequired').checked = false;
+      renderFieldsSettings();
+    }
+
+    // 拖拽排序
+    function onFieldDragStart(ev, i) {
+      dragSrcIndex = i;
+      ev.currentTarget.classList.add('dragging');
+      ev.dataTransfer.effectAllowed = 'move';
+      ev.dataTransfer.setData('text/plain', String(i));
+    }
+    function onFieldDragOver(ev) {
+      ev.preventDefault();
+      ev.currentTarget.classList.add('drag-over');
+    }
+    function onFieldDragLeave(ev) {
+      ev.currentTarget.classList.remove('drag-over');
+    }
+    function onFieldDrop(ev, targetIdx) {
+      ev.preventDefault();
+      ev.currentTarget.classList.remove('drag-over');
+      const srcIdx = dragSrcIndex == null ? Number(ev.dataTransfer.getData('text/plain')) : dragSrcIndex;
+      if (srcIdx === targetIdx || isNaN(srcIdx)) return;
+      const [moved] = fieldsConfig.splice(srcIdx, 1);
+      fieldsConfig.splice(targetIdx, 0, moved);
+      dragSrcIndex = null;
+      renderFieldsSettings();
+    }
+    function onFieldDragEnd(ev) {
+      ev.currentTarget.classList.remove('dragging');
+      dragSrcIndex = null;
+      document.querySelectorAll('.field-item.drag-over').forEach(el => el.classList.remove('drag-over'));
+    }
+
+    function saveFieldSettings() {
+      // 确保核心字段存在
+      const missing = CORE_FIELDS.filter(k => !fieldsConfig.find(f => f.key === k));
+      if (missing.length) {
+        alert('缺少内置字段：' + missing.join('、') + '。已自动恢复。');
+        missing.forEach(k => {
+          const def = DEFAULT_FIELDS.find(f => f.key === k);
+          if (def) fieldsConfig.unshift(JSON.parse(JSON.stringify(def)));
+        });
+      }
+      saveData('保存字段设置');
+      render();
+      closeModal('fieldsModal');
+    }
+
+    // ============ 统计栏配置 ============
+    let tempStatsBuffer = [];
+    function openStatsConfig() {
+      tempStatsBuffer = JSON.parse(JSON.stringify(statsConfig));
+      renderStatsConfigList();
+      document.getElementById('statsConfigModal').classList.add('show');
+    }
+    function closeStatsConfig() {
+      document.getElementById('statsConfigModal').classList.remove('show');
+    }
+    function renderStatsConfigList() {
+      const container = document.getElementById('statsConfigList');
+      if (tempStatsBuffer.length === 0) {
+        container.innerHTML = '<div class="empty-hint">暂无统计项，点击下方添加</div>';
+        return;
+      }
+      let html = '';
+      tempStatsBuffer.forEach((s, i) => {
+        const numFields = fieldsConfig.filter(f => f.type === 'number' || f.type === 'formula');
+        const numFieldOpts = '<option value="">-- 选择字段 --</option>' +
+          numFields.map(f => '<option value="' + escapeAttr(f.key) + '"' + (s.field === f.key ? ' selected' : '') + '>' + escapeHtml(f.label) + '</option>').join('');
+        const icons = ['📋','💰','⏳','📊','🎯','📈','🔢','⭐','🏷️','📦'];
+        const iconOpts = icons.map(ic => '<option value="' + ic + '"' + (s.icon === ic ? ' selected' : '') + '>' + ic + '</option>').join('');
+        const colors = ['blue','green','orange','purple','red'];
+        const colorOpts = colors.map(c => '<option value="' + c + '"' + (s.color === c ? ' selected' : '') + '>' + c + '</option>').join('');
+        const typeOpts = [
+          { v: 'count', label: '计数（订单数）' },
+          { v: 'sum', label: '求和（数字字段）' },
+          { v: 'avg', label: '平均（数字字段）' },
+          { v: 'count_filtered', label: '计数（按字段筛选）' }
+        ];
+        const typeSel = typeOpts.map(t => '<option value="' + t.v + '"' + (s.type === t.v ? ' selected' : '') + '>' + t.label + '</option>').join('');
+
+        html += '<div style="border:1px solid #e8e8e8;border-radius:6px;padding:10px;background:#fafbfc;">' +
+          '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">' +
+          '<span>图标</span><select oninput="tempStatsBuffer['+i+'].icon=this.value">' + iconOpts + '</select>' +
+          '<span>颜色</span><select oninput="tempStatsBuffer['+i+'].color=this.value">' + colorOpts + '</select>' +
+          '<span style="margin-left:auto;">类型</span><select oninput="tempStatsBuffer['+i+'].type=this.value">' + typeSel + '</select>' +
+          '<button class="btn btn-danger btn-sm" onclick="tempStatsBuffer.splice('+i+',1);renderStatsConfigList()">删除</button>' +
+          '</div>' +
+          '<div style="display:flex;gap:6px;align-items:center;">' +
+          '<input placeholder="标签名称，如 总金额" value="' + escapeAttr(s.label || '') + '" style="flex:1;padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;" oninput="tempStatsBuffer['+i+'].label=this.value">' +
+          '</div>' +
+          (s.type === 'sum' || s.type === 'avg' ?
+            '<div style="margin-top:6px;display:flex;gap:6px;align-items:center;">' +
+            '<span>字段</span><select oninput="tempStatsBuffer['+i+'].field=this.value">' + numFieldOpts + '</select>' +
+            '</div>' : '') +
+          (s.type === 'count_filtered' ?
+            '<div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">' +
+            '<span>筛选字段</span><select oninput="tempStatsBuffer['+i+'].field=this.value">' +
+              fieldsConfig.map(f => '<option value="' + escapeAttr(f.key) + '"' + (s.field === f.key ? ' selected' : '') + '>' + escapeHtml(f.label) + '</option>').join('') +
+            '</select>' +
+            '<span>值</span><input placeholder="如 pending" value="' + escapeAttr(s.filterValue || '') + '" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:120px;" oninput="tempStatsBuffer['+i+'].filterValue=this.value">' +
+            '</div>' : '') +
+          '</div>';
+      });
+      container.innerHTML = html;
+    }
+    function addStatsItem() {
+      tempStatsBuffer.push({
+        id: 'stat_' + Date.now(),
+        label: '新统计',
+        type: 'count',
+        field: '',
+        icon: '📊',
+        color: 'blue',
+        filterValue: ''
+      });
+      renderStatsConfigList();
+    }
+    function saveStatsConfig() {
+      statsConfig = JSON.parse(JSON.stringify(tempStatsBuffer));
+      saveData('保存统计配置');
+      renderStats();
+      closeStatsConfig();
+    }
+
+    // ============ 同步到 GitHub Gist ============
+    function setSyncStatus(msg, ok) {
+      const el = document.getElementById('syncStatus');
+      el.style.background = ok ? '#f0fff4' : '#fff1f0';
+      el.style.color = ok ? '#237804' : '#cf1322';
+      el.innerText = msg;
+    }
+
+    function syncToGist() {
+      const token = document.getElementById('ghToken').value.trim();
+      let gistId = document.getElementById('ghGistId').value.trim();
+      if (!token) { alert('请先填入 GitHub Token'); return; }
+      setSyncStatus('正在上传...', true);
+      const payload = {
+        fieldsConfig: fieldsConfig,
+        fieldDefaults: fieldDefaults,
+        orders: orders,
+        syncToken: token,
+        statsConfig: statsConfig,
+        savedAt: new Date().toISOString()
+      };
+      const content = JSON.stringify(payload, null, 2);
+      const files = {};
+      files[SYNC_GIST_FILENAME] = { content: content };
+
+      let url;
+      let method;
+      if (gistId) {
+        method = 'PATCH';
+        url = 'https://api.github.com/gists/' + gistId;
+      } else {
+        method = 'POST';
+        url = 'https://api.github.com/gists';
+      }
+      fetch(url, {
+        method: method,
+        headers: {
+          'Accept': 'application/vnd.github.v3+json',
+          'Authorization': 'token ' + token,
+          'Content-Type': 'application/json',
+          'User-Agent': 'OrderManager/1.0'
+        },
+        body: JSON.stringify({
+          description: '订单管理系统同步数据',
+          public: false,
+          files: files
+        })
+      }).then(r => {
+        if (!r.ok) {
+          return r.text().then(t => { throw new Error('HTTP ' + r.status + ': ' + t); });
+        }
+        return r.json();
+      }).then(data => {
+        syncToken = token;
+        if (data && data.id) {
+          syncGistId = data.id;
+          document.getElementById('ghGistId').value = data.id;
+        }
+        saveData();
+        setSyncStatus('✅ 同步成功！Gist ID: ' + syncGistId, true);
+      }).catch(err => {
+        console.error(err);
+        setSyncStatus('❌ 上传失败：' + err.message, false);
+      });
+    }
+
+    function syncFromGist() {
+      const token = document.getElementById('ghToken').value.trim();
+      let gistId = document.getElementById('ghGistId').value.trim();
+      if (!token) { alert('请先填入 GitHub Token'); return; }
+      if (!gistId && syncGistId) gistId = syncGistId;
+      if (!gistId) { alert('请先填入 Gist ID，或先在本设备执行一次"同步到云端"'); return; }
+      setSyncStatus('正在下载...', true);
+      fetch('https://api.github.com/gists/' + gistId, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/vnd.github.v3+json',
+          'Authorization': 'token ' + token,
+          'User-Agent': 'OrderManager/1.0'
+        }
+      }).then(r => {
+        if (!r.ok) {
+          return r.text().then(t => { throw new Error('HTTP ' + r.status + ': ' + t); });
+        }
+        return r.json();
+      }).then(data => {
+        const file = data.files && data.files[SYNC_GIST_FILENAME];
+        if (!file || !file.content) throw new Error('Gist 中没有找到数据文件 ' + SYNC_GIST_FILENAME);
+        const parsed = JSON.parse(file.content);
+        if (parsed.fieldsConfig && parsed.fieldsConfig.length) fieldsConfig = mergeFieldsFromStorage(parsed.fieldsConfig);
+        if (parsed.fieldDefaults) fieldDefaults = parsed.fieldDefaults;
+        if (Array.isArray(parsed.orders)) orders = parsed.orders;
+        if (parsed.statsConfig && Array.isArray(parsed.statsConfig)) statsConfig = parsed.statsConfig;
+        syncToken = token;
+        syncGistId = gistId;
+        saveData();
+        render();
+        setSyncStatus('✅ 同步成功！共载入 ' + orders.length + ' 条订单', true);
+      }).catch(err => {
+        console.error(err);
+        setSyncStatus('❌ 下载失败：' + err.message, false);
+      });
+    }
+
+    // ============ 回车保存行内编辑 ============
+    document.addEventListener('keydown', function(ev) {
+      // Ctrl+Z / Ctrl+Y（mac: Cmd+Z / Cmd+Shift+Z）
+      const mod = ev.ctrlKey || ev.metaKey;
+      if (mod && (ev.key === 'z' || ev.key === 'Z')) {
+        if (ev.shiftKey) { redoAction(); } else { undoAction(); }
+        ev.preventDefault();
+        return;
+      }
+      if (mod && (ev.key === 'y' || ev.key === 'Y')) {
+        redoAction();
+        ev.preventDefault();
+        return;
+      }
+      const editor = document.getElementById('inlineEditor');
+      if (editor.style.display === 'none') return;
+      if (ev.key === 'Enter' && !ev.ctrlKey && !ev.shiftKey && !ev.altKey) {
+        const target = ev.target;
+        if (target && target.tagName === 'TEXTAREA') return; // 多行文本回车换行
+        ev.preventDefault();
+        saveInlineEdit(null);
+      } else if (ev.key === 'Escape') {
+        closeInlineEditor();
+      }
+    });
+
+    // ============ 启动 ============
+    loadData();
+    // 回填同步弹窗
+    document.getElementById('ghToken').value = syncToken || '';
+    document.getElementById('ghGistId').value = syncGistId || '';
+    render();
+    updateUndoRedoButtons(); // 初始按钮状态（两个都是禁用）
+    // 初始化 IndexedDB 备份系统并启动自动备份调度
+    initBackupDB().then(db => {
+      if (db) {
+        scheduleAutoBackup();
+        // 启动后立即做一次短期备份检查（若距上次不足 19 分钟会被跳过，首次启动会备份一次）
+        tryDoShortBackup();
+      }
+    });
+
+    // ============ PWA 离线缓存与更新 ============
+    const APP_VERSION = '2026.07.30-3'; // 每次修改系统时改一下版本号即可触发更新
+    let pendingSW = null;
+
+    // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
+    const canUseSW = location.protocol.startsWith('http');
+    if (canUseSW && 'serviceWorker' in navigator) {
+      (function () {
+        const SW_CODE = [
+          'const CACHE = "order-cache-" + (new Date().getTime());',
+          'const CORE = ["index.html", "./"];',
+          'self.addEventListener("install", e => {',
+          '  e.waitUntil(caches.open(CACHE).then(c => c.addAll(CORE)).catch(()=>{}));',
+          '  self.skipWaiting();',
+          '});',
+          'self.addEventListener("activate", e => {',
+          '  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))));',
+          '  self.clients.claim();',
+          '});',
+          'self.addEventListener("fetch", e => {',
+          '  const req = e.request;',
+          '  if (req.method !== "GET") return;',
+          '  e.respondWith(',
+          '    caches.match(req).then(hit => hit || fetch(req).then(res => {',
+          '      if (res && res.ok && new URL(req.url).origin === location.origin) {',
+          '        const copy = res.clone();',
+          '        caches.open(CACHE).then(c => { try { c.put(req, copy); } catch(err){} });',
+          '      }',
+          '      return res;',
+          '    }).catch(() => {',
+          '      if (req.mode === "navigate" || (req.headers.get("accept")||"").includes("text/html")) {',
+          '        return caches.match("./").then(r => r || caches.match("index.html"));',
+          '      }',
+          '      return new Response("Offline", {status:503});',
+          '    }))',
+          '  );',
+          '});'
+        ].join('\n');
+        const blob = new Blob([SW_CODE], { type: 'application/javascript' });
+        const swURL = URL.createObjectURL(blob);
+        navigator.serviceWorker.register(swURL).then(reg => {
+          // 每次页面加载时检查更新
+          reg.addEventListener('updatefound', () => {
+            const nw = reg.installing || reg.waiting;
+            if (nw) {
+              nw.onstatechange = () => {
+                if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+                  pendingSW = nw;
+                  showUpdateAvailable();
+                }
+              };
+            }
+          });
+          // 如果等待中的新版本
+          if (reg.waiting && navigator.serviceWorker.controller) {
+            pendingSW = reg.waiting;
+            showUpdateAvailable();
+          }
+          // 启动后10秒静默检查一次
+          setTimeout(() => { try { reg.update(); } catch(e){} }, 10000);
+        }).catch(() => {});
+
+        // 新版本激活后刷新
+        let reloading = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          if (!reloading) { reloading = true; location.reload(); }
+        });
+      })();
+    }
+
+    function showUpdateAvailable() {
+      try {
+        const btn = document.getElementById('checkUpdateBtn');
+        if (btn) {
+          btn.style.background = '#52c41a';
+          btn.style.color = '#fff';
+          btn.innerText = '🔄 发现新版本(点我更新)';
+          btn.title = '点击立即更新';
+        }
+      } catch(e) {}
+    }
+    function checkForUpdates() {
+      if (!canUseSW || !('serviceWorker' in navigator)) {
+        alert('当前是本地文件模式(file://)，无法自动检查更新。\n请使用本地打开新的 index.html 文件即可更新。\n建议部署到 GitHub Pages 后可自动更新。');
+        return;
+      }
+      if (pendingSW) {
+        if (confirm('发现新版本！是否立即刷新使用新版本？\n（你的订单数据不受影响）')) {
+          try { pendingSW.postMessage({ action: 'skipWaiting' }); pendingSW = null; location.reload(); } catch(e){ location.reload(); }
+        }
+        return;
+      }
+      navigator.serviceWorker.getRegistration().then(reg => {
+        if (!reg) { alert('缓存未注册，刷新页面后再试'); return; }
+        reg.update().then(() => {
+          setTimeout(() => {
+            if (pendingSW) {
+              if (confirm('发现新版本！是否立即刷新使用新版本？')) {
+                try { pendingSW.postMessage({ action: 'skipWaiting' }); pendingSW = null; location.reload(); } catch(e){ location.reload(); }
+              }
+            } else {
+              alert('当前已是最新版本 (v' + APP_VERSION + ')');
+            }
+          }, 2500);
+        }).catch(() => { alert('检查更新失败，请检查网络'); });
+      });
+    }
+</script>
+</body>
+</html>
