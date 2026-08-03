@@ -198,7 +198,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.07.30-11</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.07.30-12</button>
     <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
     <button class="btn btn-secondary" onclick="openStatsConfig()">📊 统计配置</button>
@@ -597,6 +597,7 @@
     // 行内编辑状态
     let currentInlineFieldKey = null;
     let currentInlineOrderId = null;
+    let batchSyncMode = false; // 行内编辑批量同步模式：修改应用到所有选中订单
 
     // 撤销 / 重做栈（最多各 100 条）
     const UNDO_LIMIT = 100;
@@ -2226,12 +2227,18 @@
       if (!order) return;
       currentInlineFieldKey = fieldKey;
       currentInlineOrderId = orderId;
+      // 批量同步模式：有选中订单且点击的订单在选中集合中 → 修改同步到所有选中订单（图片字段除外）
+      batchSyncMode = selectedOrders.size > 0 && selectedOrders.has(orderId) && field.type !== 'imageText';
 
       const val = order[fieldKey];
       const editor = document.getElementById('inlineEditor');
       editor.style.display = 'block';
       let editorHtml = '';
       editorHtml += renderInlineEditor(field, val);
+      // 批量模式提示
+      if (batchSyncMode) {
+        editorHtml = '<div style="margin-bottom:8px;padding:6px 10px;background:#e6f4ff;border:1px solid #91caff;border-radius:6px;font-size:12px;color:#0958d9;">📋 批量同步：修改将应用到已选中的 <b>' + selectedOrders.size + '</b> 个订单</div>' + editorHtml;
+      }
       const isSelectWithOptions = field.type === 'select' && field.options && field.options.length > 0;
       editorHtml += '<div class="ie-actions">';
       editorHtml += '<button class="btn btn-secondary btn-sm" onclick="closeInlineEditor()">取消</button>';
@@ -2392,18 +2399,35 @@
       document.getElementById('inlineMask').classList.remove('show');
       currentInlineFieldKey = null;
       currentInlineOrderId = null;
+      batchSyncMode = false;
     }
 
-    // 下拉选择直接点击生效
+    // 下拉选择直接点击生效（批量模式下同步到所有选中订单）
     function ieSelectOption(value) {
       const field = fieldsConfig.find(f => f.key === currentInlineFieldKey);
       if (!field) return;
       const order = orders.find(o => o.id === currentInlineOrderId);
       if (!order) return;
+      if (batchSyncMode) {
+        applyBatchSync(field.key, value);
+        return;
+      }
       order[field.key] = value;
       saveData('行内编辑: ' + field.label);
       render();
       closeInlineEditor();
+    }
+
+    // 批量同步：把修改应用到所有选中的订单
+    function applyBatchSync(fieldKey, newVal) {
+      const field = fieldsConfig.find(f => f.key === fieldKey);
+      const targets = orders.filter(o => selectedOrders.has(o.id));
+      const changed = targets.filter(o => (o[fieldKey] === undefined ? '' : o[fieldKey]) !== newVal).length;
+      targets.forEach(o => { o[fieldKey] = newVal; pushToDefaults(o); });
+      saveData('批量修改 ' + (field ? field.label : fieldKey) + '（' + changed + ' 个订单）');
+      render();
+      closeInlineEditor();
+      showToast('✅ 已同步修改 ' + changed + ' 个订单的「' + (field ? field.label : fieldKey) + '」');
     }
 
     function saveInlineEdit(ev) {
@@ -2445,6 +2469,11 @@
       }
 
       order[field.key] = newVal;
+      // 批量模式下同步到所有选中订单
+      if (batchSyncMode) {
+        applyBatchSync(field.key, newVal);
+        return;
+      }
       pushToDefaults(order);
       saveData('行内编辑: ' + field.label);
       render();
@@ -3048,7 +3077,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.07.30-11'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.07.30-12'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
