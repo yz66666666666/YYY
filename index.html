@@ -198,7 +198,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.07.30-10</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.07.30-11</button>
     <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
     <button class="btn btn-secondary" onclick="openStatsConfig()">📊 统计配置</button>
@@ -221,6 +221,7 @@
   <span id="batchCount" style="font-size:13px;color:#555;">已选择 0 项</span>
   <button class="btn btn-secondary btn-sm" onclick="clearSelection()">取消选择</button>
   <button class="btn btn-secondary btn-sm" onclick="selectAllVisible()">全选当前</button>
+  <button class="btn btn-primary btn-sm" onclick="openBatchEdit()">✏️ 批量修改</button>
   <button class="btn btn-primary btn-sm" onclick="openBatchCalc()">🧮 批量计算</button>
   <button class="btn btn-danger btn-sm" onclick="batchDelete()">🗑️ 批量删除</button>
 </div>
@@ -477,6 +478,33 @@
     </div>
     <div class="modal-ftr">
       <button class="btn btn-secondary" onclick="document.getElementById('batchCalcModal').classList.remove('show')">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 批量修改弹窗 ============ -->
+<div class="modal-mask" id="batchEditModal">
+  <div class="modal modal-md">
+    <div class="modal-hdr">
+      <h3>✏️ 批量修改字段</h3>
+      <button class="close-x" onclick="document.getElementById('batchEditModal').classList.remove('show')">×</button>
+    </div>
+    <div class="modal-body">
+      <div style="margin-bottom:12px;color:#555;font-size:13px;">
+        将修改已选中的 <b id="batchEditCount">0</b> 个订单的字段内容。
+      </div>
+      <div class="form-row">
+        <label>选择字段</label>
+        <div class="ctl">
+          <select class="form-select" id="batchEditField" onchange="renderBatchEditValue()"></select>
+        </div>
+      </div>
+      <div id="batchEditValueWrap" style="margin-top:10px;"></div>
+      <div style="margin-top:10px;font-size:12px;color:#888;">提示：下拉选项点击即生效，无需确认。</div>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-secondary" onclick="document.getElementById('batchEditModal').classList.remove('show')">取消</button>
+      <button class="btn btn-primary" onclick="applyBatchEdit()">✓ 应用到选中订单</button>
     </div>
   </div>
 </div>
@@ -1926,6 +1954,98 @@
       document.getElementById('batchCalcModal').classList.add('show');
       setTimeout(() => { document.getElementById('batchCalcFormula').focus(); }, 50);
     }
+
+    // ============ 批量修改字段 ============
+    let batchEditSelected = ''; // 当前选中的批量修改值（select 类型用）
+
+    function openBatchEdit() {
+      const count = selectedOrders.size;
+      if (count === 0) return;
+      document.getElementById('batchEditCount').innerText = count;
+      batchEditSelected = '';
+      const sel = document.getElementById('batchEditField');
+      // 可编辑字段：非公式、非系统、非图片
+      const editable = fieldsConfig.filter(f => f.type !== 'formula' && !f.system && f.type !== 'imageText' && f.type !== 'datetime');
+      let opts = '';
+      editable.forEach(f => {
+        opts += '<option value="' + escapeAttr(f.key) + '">' + escapeHtml(f.label) + '</option>';
+      });
+      sel.innerHTML = opts;
+      renderBatchEditValue();
+      document.getElementById('batchEditModal').classList.add('show');
+    }
+
+    function renderBatchEditValue() {
+      const wrap = document.getElementById('batchEditValueWrap');
+      const key = document.getElementById('batchEditField').value;
+      const field = fieldsConfig.find(f => f.key === key);
+      if (!field) { wrap.innerHTML = ''; return; }
+      let html = '<div class="form-row"><label>' + escapeHtml(field.label) + '</label><div class="ctl">';
+      if (field.type === 'select' && field.options && field.options.length > 0) {
+        // 选项按钮，点击即选并高亮
+        html += '<div class="chips-list" style="flex-wrap:wrap;">';
+        field.options.forEach(o => {
+          const active = (batchEditSelected === o.value) ? ' chip-active' : '';
+          html += '<div class="chip' + active + '" onclick="batchEditPickOption(\'' + escapeAttr(o.value) + '\')">' + escapeHtml(o.label) + '</div>';
+        });
+        html += '</div>';
+      } else if (field.type === 'number') {
+        html += '<input type="text" inputmode="decimal" class="form-input" id="batchEditInput" placeholder="输入新值">';
+      } else if (field.type === 'textarea') {
+        html += '<textarea class="form-textarea" id="batchEditInput" placeholder="输入新内容"></textarea>';
+      } else {
+        html += '<input type="text" class="form-input" id="batchEditInput" placeholder="输入新内容">';
+      }
+      html += '</div></div>';
+      wrap.innerHTML = html;
+    }
+
+    function batchEditPickOption(value) {
+      batchEditSelected = value;
+      // 高亮刷新
+      const wrap = document.getElementById('batchEditValueWrap');
+      const key = document.getElementById('batchEditField').value;
+      const field = fieldsConfig.find(f => f.key === key);
+      if (!field) return;
+      let html = '<div class="form-row"><label>' + escapeHtml(field.label) + '</label><div class="ctl">';
+      html += '<div class="chips-list" style="flex-wrap:wrap;">';
+      field.options.forEach(o => {
+        const active = (batchEditSelected === o.value) ? ' chip-active' : '';
+        html += '<div class="chip' + active + '" onclick="batchEditPickOption(\'' + escapeAttr(o.value) + '\')">' + escapeHtml(o.label) + '</div>';
+      });
+      html += '</div></div></div>';
+      wrap.innerHTML = html;
+    }
+
+    function applyBatchEdit() {
+      const key = document.getElementById('batchEditField').value;
+      const field = fieldsConfig.find(f => f.key === key);
+      if (!field) return;
+      let newVal;
+      if (field.type === 'select' && field.options && field.options.length > 0) {
+        newVal = batchEditSelected;
+        if (newVal === '') { showToast('⚠️ 请先点击选择一个选项'); return; }
+      } else {
+        const input = document.getElementById('batchEditInput');
+        if (!input) return;
+        const v = input.value;
+        if (field.type === 'number') {
+          newVal = (v === '') ? '' : (Number(v) || 0);
+        } else {
+          newVal = v;
+        }
+      }
+      const targets = getSelectedOrders();
+      if (targets.length === 0) return;
+      // 记录修改前的值用于撤销描述
+      const changed = targets.filter(o => (o[key] === undefined ? '' : o[key]) !== newVal).length;
+      targets.forEach(o => { o[key] = newVal; pushToDefaults(o); });
+      saveData('批量修改 ' + field.label + '（' + changed + ' 个订单）');
+      render();
+      document.getElementById('batchEditModal').classList.remove('show');
+      showToast('✅ 已修改 ' + changed + ' 个订单的「' + field.label + '」');
+    }
+
     function renderCalcPresets() {
       const el = document.getElementById('batchPresets');
       if (!el) return;
@@ -2928,7 +3048,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.07.30-10'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.07.30-11'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
