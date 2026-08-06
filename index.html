@@ -125,6 +125,9 @@
   .inline-editor .ie-textarea { width: 100%; padding: 6px 8px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 14px; min-height: 60px; resize: vertical; margin-bottom: 8px; }
   .inline-editor .ie-actions { display: flex; justify-content: flex-end; gap: 6px; }
   .chips-list { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+  .defaults-picker { margin-bottom: 2px; }
+  .defaults-toggle { display: inline-block; font-size: 11px; color: #aaa; cursor: pointer; padding: 2px 6px; user-select: none; }
+  .defaults-toggle:hover { color: #1a73e8; }
   .chip { background: #eef4ff; color: #1a73e8; padding: 3px 8px; border-radius: 12px; font-size: 12px; cursor: pointer; }
   .chip:hover { background: #d8e6ff; }
   .chip.chip-active { background: #1a73e8; color: #fff; }
@@ -198,7 +201,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.07.30-14</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.07-1</button>
     <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
     <button class="btn btn-secondary" onclick="openStatsConfig()">📊 统计配置</button>
@@ -570,6 +573,33 @@
     let currentInlineFieldKey = null;
     let currentInlineOrderId = null;
     let batchSyncMode = false; // 行内编辑批量同步模式：修改应用到所有选中订单
+
+    // 默认值快捷按钮的收起状态（按字段记录，持久保存）
+    let collapsedDefaults = {};
+    function loadCollapsedDefaults() {
+      try { collapsedDefaults = JSON.parse(localStorage.getItem('collapsedDefaults') || '{}'); } catch (e) { collapsedDefaults = {}; }
+    }
+    function saveCollapsedDefaults() {
+      try { localStorage.setItem('collapsedDefaults', JSON.stringify(collapsedDefaults)); } catch (e) {}
+    }
+    // 切换某字段默认值按钮的收起/展开（直接操作 DOM，不清空已填内容）
+    function toggleDefaults(fieldKey) {
+      const picker = document.querySelector('.defaults-picker[data-picker="' + fieldKey + '"]');
+      if (!picker) return;
+      const chips = picker.querySelector('.chips-list');
+      const toggle = picker.querySelector('.defaults-toggle');
+      const isCollapsed = collapsedDefaults[fieldKey];
+      if (isCollapsed) {
+        delete collapsedDefaults[fieldKey];
+        if (chips) chips.style.display = '';
+        if (toggle) toggle.innerText = '▼ 收起';
+      } else {
+        collapsedDefaults[fieldKey] = true;
+        if (chips) chips.style.display = 'none';
+        if (toggle) toggle.innerText = '▶ 展开';
+      }
+      saveCollapsedDefaults();
+    }
 
     // 撤销 / 重做栈（最多各 100 条）
     const UNDO_LIMIT = 100;
@@ -1572,14 +1602,18 @@
         }
         const reqHtml = f.required ? ' class="req"' : '';
         const ctl = renderFormControl(f, value, idPrefix);
-        // 默认值快捷选择（文本/数字字段，点一下填入输入框）
+        // 默认值快捷选择（文本/数字字段，点一下填入输入框；可收起，状态持久保存）
         let chipsHtml = '';
         if (f.type === 'text' || f.type === 'number') {
           const defaults = fieldDefaults[f.key] || [];
           if (defaults.length > 0) {
-            chipsHtml = '<div class="chips-list">' + defaults.map(v =>
-              '<div class="chip" onclick="formUseDefault(\'' + escapeAttr(f.key) + '\', \'' + escapeAttr(String(v).replace(/'/g, "\\'")) + '\')">' + escapeHtml(String(v)) + '</div>'
-            ).join('') + '</div>';
+            const isCollapsed = !!collapsedDefaults[f.key];
+            chipsHtml = '<div class="defaults-picker" data-picker="' + escapeAttr(f.key) + '">' +
+              '<div class="chips-list"' + (isCollapsed ? ' style="display:none;"' : '') + '>' + defaults.map(v =>
+                '<div class="chip" onclick="formUseDefault(\'' + escapeAttr(f.key) + '\', \'' + escapeAttr(String(v).replace(/'/g, "\\'")) + '\')">' + escapeHtml(String(v)) + '</div>'
+              ).join('') + '</div>' +
+              '<div class="defaults-toggle" onclick="toggleDefaults(\'' + escapeAttr(f.key) + '\')">' + (isCollapsed ? '▶ 展开' : '▼ 收起') + '</div>' +
+              '</div>';
           }
         }
         html += '<div class="form-row"><label' + reqHtml + '>' + label + '</label><div class="ctl">' + ctl + chipsHtml + '</div></div>';
@@ -2219,13 +2253,17 @@
         html += '<input class="ie-input" id="ieInput" value="' + escapeAttr(val == null ? '' : val) + '">';
       }
 
-      // 默认 chips 仅适用于 text / number / imageText-text
+      // 默认 chips 仅适用于 text / number / imageText-text（可收起，状态持久保存）
       if (field.type === 'text' || field.type === 'number' || field.type === 'imageText') {
-        html += '<div class="chips-list">';
+        const isCollapsed = !!collapsedDefaults[field.key];
+        html += '<div class="defaults-picker" data-picker="' + escapeAttr(field.key) + '">';
+        html += '<div class="chips-list"' + (isCollapsed ? ' style="display:none;"' : '') + '>';
         defaults.forEach(v => {
           html += '<div class="chip" onclick="ieUseDefault(\'' + escapeAttr(String(v).replace(/'/g,"\\'")) + '\')">' + escapeHtml(String(v)) + '</div>';
         });
         html += '<button class="chip-manage-btn" onclick="manageDefaultsClick(\'' + escapeAttr(field.key) + '\')">管理…</button>';
+        html += '</div>';
+        html += '<div class="defaults-toggle" onclick="toggleDefaults(\'' + escapeAttr(field.key) + '\')">' + (isCollapsed ? '▶ 展开' : '▼ 收起') + '</div>';
         html += '</div>';
       }
       return html;
@@ -2961,6 +2999,7 @@
     // ============ 启动 ============
     loadData();
     loadDailyCounters();
+    loadCollapsedDefaults();
     // 回填同步弹窗
     document.getElementById('ghToken').value = syncToken || '';
     document.getElementById('ghGistId').value = syncGistId || '';
@@ -2976,7 +3015,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.07.30-14'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.08.07-1'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
