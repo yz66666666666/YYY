@@ -124,12 +124,14 @@
   .inline-editor .ie-select { width: 100%; padding: 6px 8px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 14px; margin-bottom: 8px; }
   .inline-editor .ie-textarea { width: 100%; padding: 6px 8px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 14px; min-height: 60px; resize: vertical; margin-bottom: 8px; }
   .inline-editor .ie-actions { display: flex; justify-content: flex-end; gap: 6px; }
-  .chips-list { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
-  .defaults-picker { margin-bottom: 2px; }
-  .defaults-toggle { display: inline-block; font-size: 11px; color: #aaa; cursor: pointer; padding: 2px 6px; user-select: none; }
+  .chips-list { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+  .defaults-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-bottom: 2px; }
+  .defaults-toggle { display: inline-block; flex: none; font-size: 11px; color: #aaa; cursor: pointer; padding: 2px 6px; user-select: none; }
   .defaults-toggle:hover { color: #1a73e8; }
   .chip { background: #eef4ff; color: #1a73e8; padding: 3px 8px; border-radius: 12px; font-size: 12px; cursor: pointer; }
   .chip:hover { background: #d8e6ff; }
+  .chip-yellow { background: #fff7e6; color: #d48806; }
+  .chip-yellow:hover { background: #ffe7ba; }
   .chip.chip-active { background: #1a73e8; color: #fff; }
   .chip-manage-btn { background: transparent; border: 1px dashed #aaa; color: #888; padding: 2px 8px; border-radius: 12px; font-size: 12px; cursor: pointer; }
   .chip-manage-btn:hover { border-color: #1a73e8; color: #1a73e8; }
@@ -201,7 +203,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.07-1</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.07-2</button>
     <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
     <button class="btn btn-secondary" onclick="openStatsConfig()">📊 统计配置</button>
@@ -303,7 +305,7 @@
       <button class="close-x" onclick="closeDefaultsModal()">×</button>
     </div>
     <div class="modal-body">
-      <div style="margin-bottom:8px;color:#555;font-size:13px;">为该字段添加、删除常用默认值。行内编辑时会以快捷标签形式显示。</div>
+      <div style="margin-bottom:8px;color:#555;font-size:13px;">这里管理的是<b>手动默认选项</b>（蓝色标签，可一直保留）。你最近填过的值会自动记入<b>黄色历史标签</b>（最多3条），无需在此管理。</div>
       <ul class="defaults-list" id="defaultsList"></ul>
       <div class="add-default-row">
         <input id="newDefaultInput" placeholder="输入默认值，回车或点击添加" onkeydown="if(event.key==='Enter')saveDefaultOption()">
@@ -563,7 +565,8 @@
     let statsConfig = JSON.parse(JSON.stringify(DEFAULT_STATS));
 
     let fieldsConfig = JSON.parse(JSON.stringify(DEFAULT_FIELDS));
-    let fieldDefaults = {}; // key -> [value1, value2, ...]
+    let fieldDefaults = {}; // key -> [value1, value2, ...] 手动默认选项（蓝色，管理弹窗维护，无上限）
+    let fieldHistory = {}; // key -> [最近3次填写的值] 自动历史记录（黄色）
     let orders = [];
     let editingId = null;
     let syncToken = '';
@@ -715,6 +718,7 @@
       return {
         fieldsConfig: JSON.parse(JSON.stringify(fieldsConfig)),
         fieldDefaults: JSON.parse(JSON.stringify(fieldDefaults)),
+        fieldHistory: JSON.parse(JSON.stringify(fieldHistory)),
         orders: JSON.parse(JSON.stringify(orders)),
         statsConfig: JSON.parse(JSON.stringify(statsConfig)),
         savedAt: new Date().toISOString()
@@ -775,6 +779,7 @@
               const d = record.data;
               if (d.fieldsConfig) fieldsConfig = d.fieldsConfig;
               if (d.fieldDefaults) fieldDefaults = d.fieldDefaults;
+              if (d.fieldHistory) fieldHistory = d.fieldHistory;
               if (d.orders) orders = d.orders;
               if (d.statsConfig) statsConfig = d.statsConfig;
               saveData();
@@ -1269,6 +1274,9 @@
           if (data.fieldDefaults && typeof data.fieldDefaults === 'object') {
             fieldDefaults = data.fieldDefaults;
           }
+          if (data.fieldHistory && typeof data.fieldHistory === 'object') {
+            fieldHistory = data.fieldHistory;
+          }
           orders = Array.isArray(data.orders) ? data.orders : [];
           syncToken = data.syncToken || '';
           syncGistId = data.syncGistId || '';
@@ -1314,6 +1322,7 @@
       const payload = {
         fieldsConfig: fieldsConfig,
         fieldDefaults: fieldDefaults,
+        fieldHistory: fieldHistory,
         orders: orders,
         syncToken: syncToken,
         syncGistId: syncGistId,
@@ -1340,6 +1349,7 @@
       if (!snap) return;
       if (snap.fieldsConfig) fieldsConfig = snap.fieldsConfig;
       if (snap.fieldDefaults) fieldDefaults = snap.fieldDefaults;
+      if (snap.fieldHistory) fieldHistory = snap.fieldHistory;
       if (snap.orders) orders = snap.orders;
       if (snap.statsConfig) statsConfig = snap.statsConfig;
     }
@@ -1356,7 +1366,7 @@
         // 同时把 lastHistorySnapshot 也更新为应用后的状态
         lastHistorySnapshot = getCurrentSnapshot();
         const payload = {
-          fieldsConfig: fieldsConfig, fieldDefaults: fieldDefaults, orders: orders,
+          fieldsConfig: fieldsConfig, fieldDefaults: fieldDefaults, fieldHistory: fieldHistory, orders: orders,
           syncToken: syncToken, syncGistId: syncGistId, statsConfig: statsConfig,
           savedAt: new Date().toISOString()
         };
@@ -1380,7 +1390,7 @@
         applySnapshot(item.snapshot);
         lastHistorySnapshot = getCurrentSnapshot();
         const payload = {
-          fieldsConfig: fieldsConfig, fieldDefaults: fieldDefaults, orders: orders,
+          fieldsConfig: fieldsConfig, fieldDefaults: fieldDefaults, fieldHistory: fieldHistory, orders: orders,
           syncToken: syncToken, syncGistId: syncGistId, statsConfig: statsConfig,
           savedAt: new Date().toISOString()
         };
@@ -1602,16 +1612,24 @@
         }
         const reqHtml = f.required ? ' class="req"' : '';
         const ctl = renderFormControl(f, value, idPrefix);
-        // 默认值快捷选择（文本/数字字段，点一下填入输入框；可收起，状态持久保存）
+        // 快捷选择（文本/数字字段，点一下填入输入框；可收起，状态持久保存）
+        // 蓝色 = 手动默认选项，黄色 = 自动历史记录（最近3次）
         let chipsHtml = '';
         if (f.type === 'text' || f.type === 'number') {
-          const defaults = fieldDefaults[f.key] || [];
-          if (defaults.length > 0) {
+          const manual = fieldDefaults[f.key] || [];
+          const history = fieldHistory[f.key] || [];
+          if (manual.length > 0 || history.length > 0) {
             const isCollapsed = !!collapsedDefaults[f.key];
             chipsHtml = '<div class="defaults-picker" data-picker="' + escapeAttr(f.key) + '">' +
-              '<div class="chips-list"' + (isCollapsed ? ' style="display:none;"' : '') + '>' + defaults.map(v =>
+              '<div class="chips-list"' + (isCollapsed ? ' style="display:none;"' : '') + '>' +
+              manual.map(v =>
                 '<div class="chip" onclick="formUseDefault(\'' + escapeAttr(f.key) + '\', \'' + escapeAttr(String(v).replace(/'/g, "\\'")) + '\')">' + escapeHtml(String(v)) + '</div>'
-              ).join('') + '</div>' +
+              ).join('') +
+              history.map(v =>
+                '<div class="chip chip-yellow" onclick="formUseDefault(\'' + escapeAttr(f.key) + '\', \'' + escapeAttr(String(v).replace(/'/g, "\\'")) + '\')">' + escapeHtml(String(v)) + '</div>'
+              ).join('') +
+              '<button class="chip-manage-btn" onclick="manageDefaultsClick(\'' + escapeAttr(f.key) + '\')">管理…</button>' +
+              '</div>' +
               '<div class="defaults-toggle" onclick="toggleDefaults(\'' + escapeAttr(f.key) + '\')">' + (isCollapsed ? '▶ 展开' : '▼ 收起') + '</div>' +
               '</div>';
           }
@@ -1883,11 +1901,12 @@
         } else {
           v = String(raw);
         }
-        if (!fieldDefaults[f.key]) fieldDefaults[f.key] = [];
-        const arr = fieldDefaults[f.key];
+        // 自动收集只记入黄色历史记录，最多3条；手动默认选项不受影响
+        if (!fieldHistory[f.key]) fieldHistory[f.key] = [];
+        const arr = fieldHistory[f.key];
         if (!arr.includes(v)) {
           arr.unshift(v);
-          if (arr.length > 20) arr.length = 20;
+          if (arr.length > 3) arr.length = 3;
         } else {
           // 提到最前
           const i = arr.indexOf(v);
@@ -2201,8 +2220,9 @@
     }
 
     function renderInlineEditor(field, val) {
-      // 默认 chips 区域
-      const defaults = fieldDefaults[field.key] || [];
+      // 默认 chips 区域（蓝色 = 手动默认选项，黄色 = 自动历史记录最近3次）
+      const manual = fieldDefaults[field.key] || [];
+      const history = fieldHistory[field.key] || [];
       let html = '<div style="margin-bottom:6px;font-weight:500;color:#555;font-size:13px;">编辑「' + escapeHtml(field.label) + '」</div>';
 
       if (field.type === 'imageText') {
@@ -2253,13 +2273,16 @@
         html += '<input class="ie-input" id="ieInput" value="' + escapeAttr(val == null ? '' : val) + '">';
       }
 
-      // 默认 chips 仅适用于 text / number / imageText-text（可收起，状态持久保存）
+      // 默认 chips（text / number / imageText 可收起，状态持久保存）
       if (field.type === 'text' || field.type === 'number' || field.type === 'imageText') {
         const isCollapsed = !!collapsedDefaults[field.key];
         html += '<div class="defaults-picker" data-picker="' + escapeAttr(field.key) + '">';
         html += '<div class="chips-list"' + (isCollapsed ? ' style="display:none;"' : '') + '>';
-        defaults.forEach(v => {
+        manual.forEach(v => {
           html += '<div class="chip" onclick="ieUseDefault(\'' + escapeAttr(String(v).replace(/'/g,"\\'")) + '\')">' + escapeHtml(String(v)) + '</div>';
+        });
+        history.forEach(v => {
+          html += '<div class="chip chip-yellow" onclick="ieUseDefault(\'' + escapeAttr(String(v).replace(/'/g,"\\'")) + '\')">' + escapeHtml(String(v)) + '</div>';
         });
         html += '<button class="chip-manage-btn" onclick="manageDefaultsClick(\'' + escapeAttr(field.key) + '\')">管理…</button>';
         html += '</div>';
@@ -2772,6 +2795,8 @@
           { v: 'count_filtered', label: '计数（按字段筛选）' }
         ];
         const typeSel = typeOpts.map(t => '<option value="' + t.v + '"' + (s.type === t.v ? ' selected' : '') + '>' + t.label + '</option>').join('');
+        // 当前筛选字段对应的字段配置（用于判断"值"用下拉还是文本输入）
+        const selField = fieldsConfig.find(f => f.key === s.field);
 
         html += '<div style="border:1px solid #e8e8e8;border-radius:6px;padding:10px;background:#fafbfc;">' +
           '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">' +
@@ -2789,10 +2814,16 @@
             '</div>' : '') +
           (s.type === 'count_filtered' ?
             '<div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">' +
-            '<span>筛选字段</span><select oninput="tempStatsBuffer['+i+'].field=this.value">' +
+            '<span>筛选字段</span><select oninput="tempStatsBuffer['+i+'].field=this.value;renderStatsConfigList()">' +
               fieldsConfig.map(f => '<option value="' + escapeAttr(f.key) + '"' + (s.field === f.key ? ' selected' : '') + '>' + escapeHtml(f.label) + '</option>').join('') +
             '</select>' +
-            '<span>值</span><input placeholder="如 pending" value="' + escapeAttr(s.filterValue || '') + '" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:120px;" oninput="tempStatsBuffer['+i+'].filterValue=this.value">' +
+            '<span>值</span>' +
+            (selField && selField.type === 'select' && selField.options && selField.options.length > 0 ?
+              '<select style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;" onchange="tempStatsBuffer['+i+'].filterValue=this.value">' +
+                '<option value="">-- 请选择 --</option>' +
+                selField.options.map(o => '<option value="' + escapeAttr(o.value) + '"' + (String(s.filterValue) === String(o.value) ? ' selected' : '') + '>' + escapeHtml(o.label) + '</option>').join('') +
+              '</select>' :
+              '<input placeholder="如 pending" value="' + escapeAttr(s.filterValue || '') + '" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:120px;" oninput="tempStatsBuffer['+i+'].filterValue=this.value">') +
             '</div>' : '') +
           '</div>';
       });
@@ -2833,6 +2864,7 @@
       const payload = {
         fieldsConfig: fieldsConfig,
         fieldDefaults: fieldDefaults,
+        fieldHistory: fieldHistory,
         orders: orders,
         syncToken: token,
         statsConfig: statsConfig,
@@ -2908,6 +2940,7 @@
         const parsed = JSON.parse(file.content);
         if (parsed.fieldsConfig && parsed.fieldsConfig.length) fieldsConfig = mergeFieldsFromStorage(parsed.fieldsConfig);
         if (parsed.fieldDefaults) fieldDefaults = parsed.fieldDefaults;
+        if (parsed.fieldHistory) fieldHistory = parsed.fieldHistory;
         if (Array.isArray(parsed.orders)) orders = parsed.orders;
         if (parsed.statsConfig && Array.isArray(parsed.statsConfig)) statsConfig = parsed.statsConfig;
         syncToken = token;
@@ -2956,6 +2989,7 @@
           // 恢复数据
           if (data.fieldsConfig && data.fieldsConfig.length) fieldsConfig = mergeFieldsFromStorage(data.fieldsConfig);
           if (data.fieldDefaults) fieldDefaults = data.fieldDefaults;
+          if (data.fieldHistory) fieldHistory = data.fieldHistory;
           if (Array.isArray(data.orders)) orders = data.orders;
           if (data.statsConfig && Array.isArray(data.statsConfig)) statsConfig = data.statsConfig;
           saveData('导入本地数据');
@@ -3015,7 +3049,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.08.07-1'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.08.07-2'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
