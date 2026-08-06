@@ -61,9 +61,30 @@
   .card-label { width: 80px; color: #888; flex-shrink: 0; }
   .card-value { flex: 1; color: #222; word-break: break-all; cursor: pointer; }
   .card-value:hover { background: #f8faff; outline: 1px dashed #a8c7ff; border-radius: 3px; }
+
+  /* 移动端视图切换 + 紧凑行视图 */
+  .view-switch { display: none; align-items: center; gap: 4px; }
+  .view-switch-btn { padding: 4px 10px; border: 1px solid #d9d9d9; border-radius: 5px; background: #fff; color: #555; font-size: 12px; cursor: pointer; line-height: 1.6; }
+  .view-switch-btn.active { background: #1a73e8; color: #fff; border-color: #1a73e8; }
+  .compact-list { display: none; }
+  .compact-row { display: flex; align-items: center; gap: 6px; padding: 7px 10px; background: #fff; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 6px; }
+  .compact-row .cr-check { flex: none; display: flex; }
+  .compact-row .cr-check input { width: 16px; height: 16px; }
+  .compact-cells { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; overflow: hidden; }
+  .compact-cell { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: #222; cursor: pointer; }
+  .compact-cell .tag { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+  .compact-cell .img-txt { display: inline-flex; max-width: 100%; }
+  .compact-cell .img-txt img, .compact-cell .img-txt .thumb { width: 22px; height: 22px; flex: none; }
+  .compact-cell:hover { background: #f8faff; outline: 1px dashed #a8c7ff; border-radius: 3px; }
+  .compact-actions { flex: none; display: flex; gap: 4px; }
   @media (max-width: 768px) {
+    .view-switch { display: flex; }
     .table-wrap { display: none; }
-    .card-list { display: flex; }
+    .card-list { display: none; }
+    .compact-list { display: none; }
+    body[data-mview="table"] .table-wrap { display: block; }
+    body[data-mview="card"] .card-list { display: flex; }
+    body[data-mview="compact"] .compact-list { display: block; }
     header h1 { font-size: 16px; }
     .btn { padding: 6px 10px; font-size: 13px; }
   }
@@ -203,7 +224,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.07-3</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.07-4</button>
     <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
     <button class="btn btn-secondary" onclick="openStatsConfig()">📊 统计配置</button>
@@ -218,6 +239,12 @@
   <select id="statusFilter" onchange="render()">
     <option value="">全部状态</option>
   </select>
+  <div class="view-switch" id="viewSwitch">
+    <button class="view-switch-btn" data-mview="compact" onclick="setMobileView('compact')">一 紧凑</button>
+    <button class="view-switch-btn" data-mview="card" onclick="setMobileView('card')">▤ 卡片</button>
+    <button class="view-switch-btn" data-mview="table" onclick="setMobileView('table')">☰ 表格</button>
+    <button class="view-switch-btn" onclick="openCompactConfig()" title="紧凑行显示哪些字段">列⚙</button>
+  </div>
   <button class="btn btn-secondary btn-sm" style="margin-left:auto;" onclick="renderFieldsSettings();document.getElementById('fieldsModal').classList.add('show')">⚙️ 字段设置</button>
 </div>
 
@@ -238,6 +265,7 @@
     </table>
   </div>
   <div class="card-list" id="cardList"></div>
+  <div class="compact-list" id="compactList"></div>
 </main>
 
 <!-- ============ 新增/编辑订单弹窗 ============ -->
@@ -314,6 +342,24 @@
     </div>
     <div class="modal-ftr">
       <button class="btn btn-primary" onclick="closeDefaultsModal()">完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 紧凑行字段设置弹窗 ============ -->
+<div class="modal-mask" id="compactConfigModal">
+  <div class="modal modal-sm">
+    <div class="modal-hdr">
+      <h3>紧凑行显示字段</h3>
+      <button class="close-x" onclick="closeCompactConfig()">×</button>
+    </div>
+    <div class="modal-body">
+      <div style="margin-bottom:8px;color:#555;font-size:13px;">勾选要在紧凑行里显示的字段（建议 2~4 个）。不勾选则使用默认字段，顺序按字段设置里的顺序。</div>
+      <div id="compactFieldList"></div>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-secondary" onclick="closeCompactConfig()">取消</button>
+      <button class="btn btn-primary" onclick="saveCompactConfig()">保存</button>
     </div>
   </div>
 </div>
@@ -1410,6 +1456,7 @@
       renderTableHead();
       renderTbody();
       renderCards();
+      renderCompactList();
       updateBatchBar();
     }
 
@@ -1563,6 +1610,93 @@
         html += '</div>';
       });
       container.innerHTML = html;
+    }
+
+    // ============ 移动端视图切换 + 紧凑行视图 ============
+    let mobileViewMode = 'compact';
+    let compactFieldKeys = null; // 用户配置的紧凑行字段（null = 用默认）
+    function loadViewSettings() {
+      try { mobileViewMode = localStorage.getItem('mobileViewMode') || 'compact'; } catch(e) {}
+      try { compactFieldKeys = JSON.parse(localStorage.getItem('compactFieldKeys') || 'null'); } catch(e) { compactFieldKeys = null; }
+      if (['card', 'compact', 'table'].indexOf(mobileViewMode) < 0) mobileViewMode = 'compact';
+    }
+    function saveViewSettings() {
+      try {
+        localStorage.setItem('mobileViewMode', mobileViewMode);
+        localStorage.setItem('compactFieldKeys', JSON.stringify(compactFieldKeys));
+      } catch(e) {}
+    }
+    function setMobileView(mode) {
+      mobileViewMode = mode;
+      saveViewSettings();
+      document.body.setAttribute('data-mview', mode);
+      updateViewSwitchButtons();
+      render();
+    }
+    function updateViewSwitchButtons() {
+      document.querySelectorAll('.view-switch-btn[data-mview]').forEach(b => {
+        b.classList.toggle('active', b.getAttribute('data-mview') === mobileViewMode);
+      });
+    }
+    // 紧凑行要显示的字段：优先用户配置，没配置或全失效时用默认（订单号/状态/价格/客户）
+    function getCompactFieldKeys() {
+      let keys = Array.isArray(compactFieldKeys) ? compactFieldKeys.filter(k => fieldsConfig.find(f => f.key === k)) : [];
+      if (keys.length > 0) return keys;
+      const prefer = ['orderNo', 'status', 'price', 'customer'];
+      const defaults = fieldsConfig.filter(f => !f.hidden && prefer.indexOf(f.key) >= 0).map(f => f.key);
+      if (defaults.length > 0) return defaults;
+      return fieldsConfig.filter(f => !f.hidden).slice(0, 3).map(f => f.key);
+    }
+    function renderCompactList() {
+      const container = document.getElementById('compactList');
+      if (!container) return;
+      const list = getFilteredOrders();
+      const keyFields = fieldsConfig.filter(f => !f.hidden && getCompactFieldKeys().indexOf(f.key) >= 0);
+      if (list.length === 0) {
+        container.innerHTML = '<div style="text-align:center;color:#999;padding:30px;">暂无订单，点击右上角 + 新增订单</div>';
+        return;
+      }
+      let html = '';
+      list.forEach(o => {
+        const checked = selectedOrders.has(o.id) ? 'checked' : '';
+        html += '<div class="compact-row">';
+        html += '<label class="cr-check"><input type="checkbox" ' + checked + ' onchange="toggleSelectOrder(\'' + escapeAttr(o.id) + '\', this.checked)"></label>';
+        html += '<div class="compact-cells">';
+        keyFields.forEach(f => {
+          const isFormula = f.type === 'formula';
+          const onclick = isFormula ? '' : 'onclick="startInlineEdit(this, \'' + escapeAttr(o.id) + '\', \'' + escapeAttr(f.key) + '\')"';
+          html += '<div class="compact-cell" ' + onclick + ' title="' + escapeHtml(f.label) + '">' + renderCellValue(f, o) + '</div>';
+        });
+        html += '</div>';
+        html += '<div class="compact-actions">' +
+          '<button class="btn btn-secondary btn-sm" onclick="editOrder(\'' + escapeAttr(o.id) + '\')">编辑</button>' +
+          '<button class="btn btn-danger btn-sm" onclick="deleteOrder(\'' + escapeAttr(o.id) + '\')">删</button>' +
+          '</div>';
+        html += '</div>';
+      });
+      container.innerHTML = html;
+    }
+    function openCompactConfig() {
+      renderCompactFieldList();
+      document.getElementById('compactConfigModal').classList.add('show');
+    }
+    function closeCompactConfig() {
+      document.getElementById('compactConfigModal').classList.remove('show');
+    }
+    function renderCompactFieldList() {
+      const cur = getCompactFieldKeys();
+      const container = document.getElementById('compactFieldList');
+      container.innerHTML = fieldsConfig.filter(f => !f.hidden).map(f =>
+        '<label style="display:flex;align-items:center;gap:8px;padding:7px 4px;border-bottom:1px solid #f0f0f0;font-size:14px;cursor:pointer;">' +
+          '<input type="checkbox" data-ckey="' + escapeAttr(f.key) + '"' + (cur.indexOf(f.key) >= 0 ? ' checked' : '') + '> ' + escapeHtml(f.label) +
+        '</label>'
+      ).join('');
+    }
+    function saveCompactConfig() {
+      compactFieldKeys = Array.prototype.map.call(document.querySelectorAll('#compactFieldList input:checked'), cb => cb.getAttribute('data-ckey'));
+      saveViewSettings();
+      closeCompactConfig();
+      render();
     }
 
     function showImgPreview(src) {
@@ -3052,6 +3186,9 @@
     loadData();
     loadDailyCounters();
     loadCollapsedDefaults();
+    loadViewSettings();
+    document.body.setAttribute('data-mview', mobileViewMode);
+    updateViewSwitchButtons();
     // 回填同步弹窗
     document.getElementById('ghToken').value = syncToken || '';
     document.getElementById('ghGistId').value = syncGistId || '';
@@ -3067,7 +3204,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.08.07-3'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.08.07-4'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
