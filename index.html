@@ -203,7 +203,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.07-2</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.07-3</button>
     <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
     <button class="btn btn-secondary" onclick="openStatsConfig()">📊 统计配置</button>
@@ -3030,6 +3030,24 @@
       }
     });
 
+    // ============ 订单表单：下拉框聚焦自动展开 ============
+    // 手机键盘"下一项/回车"跳到下拉框时，焦点只会落在 select 上但不会展开选项。
+    // 这里在触屏设备上检测到 select 获得焦点（非用户直接点击）时，自动调用 showPicker() 弹出选项。
+    let lastTouchedElement = null;
+    document.addEventListener('pointerdown', function(e) { lastTouchedElement = e.target; }, true);
+    const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
+    const orderFormBodyEl = document.getElementById('orderFormBody');
+    if (orderFormBodyEl) {
+      orderFormBodyEl.addEventListener('focusin', function(e) {
+        const el = e.target;
+        if (!el || el.tagName !== 'SELECT') return;
+        if (!isTouchDevice) return;        // 桌面用 Tab 聚焦时不自动展开，避免打扰
+        if (lastTouchedElement === el) return; // 用户直接点了一下，原生已展开
+        lastTouchedElement = null;
+        try { if (el.showPicker) el.showPicker(); } catch (err) {}
+      });
+    }
+
     // ============ 启动 ============
     loadData();
     loadDailyCounters();
@@ -3049,7 +3067,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.08.07-2'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.08.07-3'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
