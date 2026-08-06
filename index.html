@@ -229,7 +229,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.07-11</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.07-12</button>
     <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
     <button class="btn btn-secondary" onclick="openStatsConfig()">📊 统计配置</button>
@@ -1817,7 +1817,7 @@
               history.map(v =>
                 '<div class="chip chip-yellow" onclick="formUseDefault(\'' + escapeAttr(f.key) + '\', \'' + escapeAttr(String(v).replace(/'/g, "\\'")) + '\')">' + escapeHtml(String(v)) + '</div>'
               ).join('') +
-              '<button class="chip-manage-btn" onclick="manageDefaultsClick(\'' + escapeAttr(f.key) + '\')">管理…</button>' +
+              '<button class="chip-manage-btn" tabindex="-1" onclick="manageDefaultsClick(\'' + escapeAttr(f.key) + '\')">管理…</button>' +
               '</div>' +
               '<div class="defaults-toggle" onclick="toggleDefaults(\'' + escapeAttr(f.key) + '\')">' + (isCollapsed ? '▶ 展开' : '▼ 收起') + '</div>' +
               '</div>';
@@ -3230,6 +3230,30 @@
       });
     }
 
+    // ============ 订单表单：回车 → 跳到下一个输入项 ============
+    // 手机/电脑按回车时，自动把焦点移到下一个"可填写"的字段（跳过按钮、只读项）。
+    if (orderFormBodyEl) {
+      orderFormBodyEl.addEventListener('keydown', function(e) {
+        if (e.key !== 'Enter') return;
+        const t = e.target;
+        if (!t || (t.tagName !== 'INPUT' && t.tagName !== 'SELECT' && t.tagName !== 'TEXTAREA')) return;
+        if (t.tagName === 'TEXTAREA') return; // 多行文本：回车用于换行
+        e.preventDefault();
+        const controls = Array.prototype.filter.call(orderFormBodyEl.querySelectorAll('input, select'), function(el) {
+          if (el.type === 'hidden' || el.type === 'file') return false;
+          if (el.disabled || el.readOnly) return false;
+          if (el.offsetParent === null) return false; // 不可见控件跳过
+          return true;
+        });
+        const i = controls.indexOf(t);
+        if (i >= 0 && i < controls.length - 1) {
+          controls[i + 1].focus();
+        } else {
+          t.blur(); // 最后一个字段回车 → 收起键盘
+        }
+      });
+    }
+
     // ============ 启动 ============
     loadData();
     loadDailyCounters();
@@ -3252,7 +3276,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.08.07-11'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.08.07-12'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
