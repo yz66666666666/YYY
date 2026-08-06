@@ -229,7 +229,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.07-10</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.07-11</button>
     <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
     <button class="btn btn-secondary" onclick="openStatsConfig()">📊 统计配置</button>
@@ -1659,7 +1659,8 @@
       const container = document.getElementById('compactList');
       if (!container) return;
       const list = getFilteredOrders();
-      const keyFields = fieldsConfig.filter(f => !f.hidden && getCompactFieldKeys().indexOf(f.key) >= 0);
+      // 紧凑行显示用户勾选的字段（包括隐藏字段，隐藏只影响表格/卡片列表显示）
+      const keyFields = fieldsConfig.filter(f => getCompactFieldKeys().indexOf(f.key) >= 0);
       if (list.length === 0) {
         container.innerHTML = '<div style="text-align:center;color:#999;padding:30px;">暂无订单，点击右上角 + 新增订单</div>';
         return;
@@ -1719,7 +1720,8 @@
       const head = document.getElementById('compactHead');
       if (!head) return;
       const keys = getCompactFieldKeys();
-      const fields = fieldsConfig.filter(f => !f.hidden && keys.indexOf(f.key) >= 0);
+      // 与紧凑行一致：包含隐藏字段
+      const fields = fieldsConfig.filter(f => keys.indexOf(f.key) >= 0);
       let html = '<span class="ch"></span>';
       fields.forEach(f => {
         html += '<span class="cell" title="' + escapeHtml(f.label) + '">' + escapeHtml(f.label) + '</span>';
@@ -1736,9 +1738,11 @@
     function renderCompactFieldList() {
       const cur = getCompactFieldKeys();
       const container = document.getElementById('compactFieldList');
-      container.innerHTML = fieldsConfig.filter(f => !f.hidden).map(f =>
+      // 隐藏字段也列出可选（隐藏只是不在列表页显示，设置/紧凑行里照常可用）
+      container.innerHTML = fieldsConfig.map(f =>
         '<label style="display:flex;align-items:center;gap:8px;padding:7px 4px;border-bottom:1px solid #f0f0f0;font-size:14px;cursor:pointer;">' +
           '<input type="checkbox" data-ckey="' + escapeAttr(f.key) + '"' + (cur.indexOf(f.key) >= 0 ? ' checked' : '') + '> ' + escapeHtml(f.label) +
+          (f.hidden ? ' <span class="hidden-field-badge">隐藏</span>' : '') +
         '</label>'
       ).join('');
     }
@@ -3248,7 +3252,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.08.07-10'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.08.07-11'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
