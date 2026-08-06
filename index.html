@@ -80,6 +80,14 @@
   .compact-cell .img-txt { display: inline-flex; max-width: 100%; }
   .compact-cell .img-txt img, .compact-cell .img-txt .thumb { width: 22px; height: 22px; flex: none; }
   .compact-cell:hover { background: #f8faff; outline: 1px dashed #a8c7ff; border-radius: 3px; }
+  /* 紧凑模式：顶部订单管理系统标题行没用，隐藏；搜索栏 + 字段标题行一起吸顶 */
+  body[data-mview="compact"] header { display: none; }
+  body[data-mview="compact"] .toolbar { position: sticky; top: 0; z-index: 90; padding-left: 10px; padding-right: 10px; }
+  .compact-head { display: none; width: 100%; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; color: #888; }
+  body[data-mview="compact"] .compact-head { display: flex; }
+  .compact-head .ch { flex: none; width: 16px; }
+  .compact-head .cell { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  body[data-mview="compact"] #compactAddBtn { display: inline-block; }
   @media (max-width: 768px) {
     header h1 { font-size: 16px; }
     .btn { padding: 6px 10px; font-size: 13px; }
@@ -220,7 +228,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.07-7</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.07-8</button>
     <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
     <button class="btn btn-secondary" onclick="openStatsConfig()">📊 统计配置</button>
@@ -242,6 +250,8 @@
     <button class="view-switch-btn" onclick="openCompactConfig()" title="紧凑行显示哪些字段">列⚙</button>
   </div>
   <button class="btn btn-secondary btn-sm" style="margin-left:auto;" onclick="renderFieldsSettings();document.getElementById('fieldsModal').classList.add('show')">⚙️ 字段设置</button>
+  <button class="btn btn-primary btn-sm" id="compactAddBtn" onclick="openAddModal()" style="display:none;">+ 新增</button>
+  <div class="compact-head" id="compactHead"></div>
 </div>
 
 <!-- 批量操作栏 -->
@@ -1453,6 +1463,7 @@
       renderTbody();
       renderCards();
       renderCompactList();
+      renderCompactHead();
       updateBatchBar();
     }
 
@@ -1708,6 +1719,17 @@
           check.checked = selectedOrders.has(orderId); // 长按不改变勾选状态
         }
       });
+    }
+    function renderCompactHead() {
+      const head = document.getElementById('compactHead');
+      if (!head) return;
+      const keys = getCompactFieldKeys();
+      const fields = fieldsConfig.filter(f => !f.hidden && keys.indexOf(f.key) >= 0);
+      let html = '<span class="ch"></span>';
+      fields.forEach(f => {
+        html += '<span class="cell" title="' + escapeHtml(f.label) + '">' + escapeHtml(f.label) + '</span>';
+      });
+      head.innerHTML = html;
     }
     function openCompactConfig() {
       renderCompactFieldList();
@@ -3241,7 +3263,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.08.07-7'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.08.07-8'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
