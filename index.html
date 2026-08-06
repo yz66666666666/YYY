@@ -30,7 +30,7 @@
   main { padding: 16px; }
 
   /* 桌面 - 表格视图 */
-  .table-wrap { display: none; overflow-x: auto; background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+  .table-wrap { overflow-x: auto; background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
   table { width: 100%; border-collapse: collapse; min-width: 800px; }
   th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #f0f0f0; font-size: 14px; vertical-align: middle; }
   th { background: #fafbfc; font-weight: 600; color: #555; white-space: nowrap; position: sticky; top: 0; }
@@ -62,15 +62,14 @@
   .card-value { flex: 1; color: #222; word-break: break-all; cursor: pointer; }
   .card-value:hover { background: #f8faff; outline: 1px dashed #a8c7ff; border-radius: 3px; }
 
-  /* 视图切换 + 紧凑行视图（手机/电脑通用） */
+  /* 视图切换 + 紧凑行视图（桌面/手机通用） */
   .view-switch { display: flex; align-items: center; gap: 4px; }
   .view-switch-btn { padding: 4px 10px; border: 1px solid #d9d9d9; border-radius: 5px; background: #fff; color: #555; font-size: 12px; cursor: pointer; line-height: 1.6; }
   .view-switch-btn.active { background: #1a73e8; color: #fff; border-color: #1a73e8; }
-  .card-list { display: none; }
-  .compact-list { display: none; max-width: 900px; margin: 0 auto; }
-  body[data-mview="table"] .table-wrap { display: block; }
-  body[data-mview="card"] .card-list { display: flex; }
+  .compact-list { display: none; }
   body[data-mview="compact"] .compact-list { display: block; }
+  body[data-mview="card"] .card-list { display: flex; }
+  body[data-mview="card"] .table-wrap, body[data-mview="compact"] .table-wrap { display: none; }
   .compact-row { display: flex; align-items: center; gap: 6px; padding: 7px 10px; background: #fff; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 6px; }
   .compact-row .cr-check { flex: none; display: flex; }
   .compact-row .cr-check input { width: 16px; height: 16px; }
@@ -1618,8 +1617,8 @@
       if (saved && ['card', 'compact', 'table'].indexOf(saved) >= 0) {
         mobileViewMode = saved;
       } else {
-        // 没手动选过：电脑默认表格，手机默认紧凑
-        mobileViewMode = window.innerWidth > 768 ? 'table' : 'compact';
+        // 首次使用：小屏/触屏默认紧凑，电脑默认完整表格
+        mobileViewMode = (isTouchDevice || window.innerWidth <= 768) ? 'compact' : 'table';
       }
       try { compactFieldKeys = JSON.parse(localStorage.getItem('compactFieldKeys') || 'null'); } catch(e) { compactFieldKeys = null; }
     }
