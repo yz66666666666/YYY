@@ -68,9 +68,10 @@
   .view-switch-btn.active { background: #1a73e8; color: #fff; border-color: #1a73e8; }
   .compact-list { display: none; }
   body[data-mview="compact"] .compact-list { display: block; }
+  body[data-mview="compact"] main { padding: 0; } /* 紧凑模式：列表贴满屏幕左右，利用每一寸空间 */
   body[data-mview="card"] .card-list { display: flex; }
   body[data-mview="card"] .table-wrap, body[data-mview="compact"] .table-wrap { display: none; }
-  .compact-row { display: flex; align-items: center; gap: 6px; padding: 7px 10px; background: #fff; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 6px; }
+  .compact-row { display: flex; align-items: center; gap: 6px; padding: 8px 10px; background: #fff; border-bottom: 1px solid #f0f0f0; }
   .compact-row .cr-check { flex: none; display: flex; }
   .compact-row .cr-check input { width: 16px; height: 16px; }
   .compact-cells { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; overflow: hidden; }
@@ -79,7 +80,6 @@
   .compact-cell .img-txt { display: inline-flex; max-width: 100%; }
   .compact-cell .img-txt img, .compact-cell .img-txt .thumb { width: 22px; height: 22px; flex: none; }
   .compact-cell:hover { background: #f8faff; outline: 1px dashed #a8c7ff; border-radius: 3px; }
-  .compact-actions { flex: none; display: flex; gap: 4px; }
   @media (max-width: 768px) {
     header h1 { font-size: 16px; }
     .btn { padding: 6px 10px; font-size: 13px; }
@@ -220,7 +220,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.07-6</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.07-7</button>
     <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
     <button class="btn btn-secondary" onclick="openStatsConfig()">📊 统计配置</button>
@@ -1661,8 +1661,8 @@
       let html = '';
       list.forEach(o => {
         const checked = selectedOrders.has(o.id) ? 'checked' : '';
-        html += '<div class="compact-row">';
-        html += '<label class="cr-check"><input type="checkbox" ' + checked + ' onchange="toggleSelectOrder(\'' + escapeAttr(o.id) + '\', this.checked)"></label>';
+        html += '<div class="compact-row" data-id="' + escapeAttr(o.id) + '">';
+        html += '<label class="cr-check" title="长按进入编辑"><input type="checkbox" ' + checked + ' onchange="toggleSelectOrder(\'' + escapeAttr(o.id) + '\', this.checked)"></label>';
         html += '<div class="compact-cells">';
         keyFields.forEach(f => {
           const isFormula = f.type === 'formula';
@@ -1670,13 +1670,44 @@
           html += '<div class="compact-cell" ' + onclick + ' title="' + escapeHtml(f.label) + '">' + renderCellValue(f, o) + '</div>';
         });
         html += '</div>';
-        html += '<div class="compact-actions">' +
-          '<button class="btn btn-secondary btn-sm" onclick="editOrder(\'' + escapeAttr(o.id) + '\')">编辑</button>' +
-          '<button class="btn btn-danger btn-sm" onclick="deleteOrder(\'' + escapeAttr(o.id) + '\')">删</button>' +
-          '</div>';
         html += '</div>';
       });
       container.innerHTML = html;
+      // 长按勾选框 → 进入编辑（每行渲染后绑定）
+      Array.prototype.forEach.call(container.querySelectorAll('.compact-row'), row => {
+        bindCompactLongPress(row, row.getAttribute('data-id'));
+      });
+    }
+    function bindCompactLongPress(rowEl, orderId) {
+      const check = rowEl.querySelector('.cr-check input');
+      if (!check) return;
+      let timer = null, longPressed = false;
+      const start = function() {
+        longPressed = false;
+        clearTimeout(timer);
+        timer = setTimeout(function() {
+          longPressed = true;
+          editOrder(orderId);
+        }, 500);
+      };
+      const cancel = function() { clearTimeout(timer); };
+      check.addEventListener('touchstart', start, { passive: true });
+      check.addEventListener('touchend', function(e) {
+        clearTimeout(timer);
+        if (longPressed) e.preventDefault();
+      }, { passive: false });
+      check.addEventListener('touchmove', cancel, { passive: true });
+      check.addEventListener('mousedown', start);
+      check.addEventListener('mouseup', cancel);
+      check.addEventListener('mouseleave', cancel);
+      check.addEventListener('click', function(e) {
+        if (longPressed) {
+          e.preventDefault();
+          e.stopPropagation();
+          longPressed = false;
+          check.checked = selectedOrders.has(orderId); // 长按不改变勾选状态
+        }
+      });
     }
     function openCompactConfig() {
       renderCompactFieldList();
@@ -3210,7 +3241,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.08.07-6'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.08.07-7'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
