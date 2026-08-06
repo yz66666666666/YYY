@@ -87,6 +87,10 @@
   body[data-mview="compact"] .compact-head { display: flex; }
   .compact-head .ch { flex: none; width: 16px; }
   .compact-head .cell { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .view-switch-sep { width: 1px; height: 18px; background: #e0e0e0; }
+  .mode-config-group { margin-bottom: 14px; }
+  .mode-config-title { font-weight: 600; color: #333; font-size: 14px; margin-bottom: 6px; padding: 6px 10px; background: #f5f7fa; border-radius: 4px; }
+  .mode-config-list { border: 1px solid #eee; border-radius: 6px; padding: 4px 10px; max-height: 220px; overflow-y: auto; }
   @media (max-width: 768px) {
     header h1 { font-size: 16px; }
     .btn { padding: 6px 10px; font-size: 13px; }
@@ -228,7 +232,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.07-14</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.07-15</button>
     <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
     <button class="btn btn-secondary" onclick="openStatsConfig()">📊 统计配置</button>
@@ -247,7 +251,8 @@
     <button class="view-switch-btn" data-mview="compact" onclick="setMobileView('compact')">一 紧凑</button>
     <button class="view-switch-btn" data-mview="card" onclick="setMobileView('card')">▤ 卡片</button>
     <button class="view-switch-btn" data-mview="table" onclick="setMobileView('table')">☰ 表格</button>
-    <button class="view-switch-btn" onclick="openCompactConfig()" title="紧凑行显示哪些字段">列⚙</button>
+    <span class="view-switch-sep"></span>
+    <button class="view-switch-btn" onclick="openCompactConfig()" title="分别设置各视图显示的字段">⚙ 设置</button>
   </div>
   <button class="btn btn-secondary btn-sm" style="margin-left:auto;" onclick="renderFieldsSettings();document.getElementById('fieldsModal').classList.add('show')">⚙️ 字段设置</button>
   <div class="compact-head" id="compactHead"></div>
@@ -345,16 +350,27 @@
   </div>
 </div>
 
-<!-- ============ 紧凑行字段设置弹窗 ============ -->
+<!-- ============ 视图显示设置弹窗 ============ -->
 <div class="modal-mask" id="compactConfigModal">
-  <div class="modal modal-sm">
+  <div class="modal modal-md">
     <div class="modal-hdr">
-      <h3>紧凑行显示字段</h3>
+      <h3>视图显示设置</h3>
       <button class="close-x" onclick="closeCompactConfig()">×</button>
     </div>
     <div class="modal-body">
-      <div style="margin-bottom:8px;color:#555;font-size:13px;">勾选要在紧凑行里显示的字段（建议 2~4 个）。不勾选则使用默认字段，顺序按字段设置里的顺序。</div>
-      <div id="compactFieldList"></div>
+      <div style="margin-bottom:10px;color:#555;font-size:13px;">分别为三种视图勾选要显示的字段。带"隐藏"标记的字段不在表格/卡片里显示，但可以勾选进紧凑行。</div>
+      <div class="mode-config-group">
+        <div class="mode-config-title">一 紧凑行</div>
+        <div id="compactFieldList" class="mode-config-list"></div>
+      </div>
+      <div class="mode-config-group">
+        <div class="mode-config-title">▤ 卡片</div>
+        <div id="cardFieldList" class="mode-config-list"></div>
+      </div>
+      <div class="mode-config-group">
+        <div class="mode-config-title">☰ 表格</div>
+        <div id="tableFieldList" class="mode-config-list"></div>
+      </div>
     </div>
     <div class="modal-ftr">
       <button class="btn btn-secondary" onclick="closeCompactConfig()">取消</button>
@@ -1490,7 +1506,7 @@
     }
 
     function renderTableHead() {
-      const visibleFields = fieldsConfig.filter(f => !f.hidden);
+      const visibleFields = getVisibleFields('table');
       const filteredList = getFilteredOrders();
       const allChecked = filteredList.length > 0 && filteredList.every(o => selectedOrders.has(o.id));
       const tr = '<tr>' +
@@ -1551,7 +1567,7 @@
     function renderTbody() {
       const list = getFilteredOrders();
       const tbody = document.getElementById('ordersTbody');
-      const visibleFields = fieldsConfig.filter(f => !f.hidden);
+      const visibleFields = getVisibleFields('table');
       if (list.length === 0) {
         tbody.innerHTML = '<tr><td colspan="' + (visibleFields.length + 2) + '" style="text-align:center;padding:40px;color:#999;">暂无订单，点击右上角 + 新增订单</td></tr>';
         return;
@@ -1580,7 +1596,7 @@
     function renderCards() {
       const list = getFilteredOrders();
       const container = document.getElementById('cardList');
-      const visibleFields = fieldsConfig.filter(f => !f.hidden);
+      const visibleFields = getVisibleFields('card');
       if (list.length === 0) {
         container.innerHTML = '<div class="card" style="text-align:center;color:#999;padding:30px;">暂无订单，点击右上角 + 新增订单</div>';
         return;
@@ -1612,9 +1628,11 @@
       container.innerHTML = html;
     }
 
-    // ============ 移动端视图切换 + 紧凑行视图 ============
+    // ============ 移动端视图切换 + 各视图字段配置 ============
     let mobileViewMode = 'compact';
-    let compactFieldKeys = null; // 用户配置的紧凑行字段（null = 用默认）
+    let compactFieldKeys = null; // 紧凑行配置字段（null = 用默认）
+    let cardFieldKeys = null;    // 卡片视图配置字段（null = 显示全部非隐藏字段）
+    let tableFieldKeys = null;   // 表格视图配置字段（null = 显示全部非隐藏字段）
     function loadViewSettings() {
       let saved = null;
       try { saved = localStorage.getItem('mobileViewMode'); } catch(e) {}
@@ -1625,11 +1643,15 @@
         mobileViewMode = (isTouchDevice || window.innerWidth <= 768) ? 'compact' : 'table';
       }
       try { compactFieldKeys = JSON.parse(localStorage.getItem('compactFieldKeys') || 'null'); } catch(e) { compactFieldKeys = null; }
+      try { cardFieldKeys = JSON.parse(localStorage.getItem('cardFieldKeys') || 'null'); } catch(e) { cardFieldKeys = null; }
+      try { tableFieldKeys = JSON.parse(localStorage.getItem('tableFieldKeys') || 'null'); } catch(e) { tableFieldKeys = null; }
     }
     function saveViewSettings() {
       try {
         localStorage.setItem('mobileViewMode', mobileViewMode);
         localStorage.setItem('compactFieldKeys', JSON.stringify(compactFieldKeys));
+        localStorage.setItem('cardFieldKeys', JSON.stringify(cardFieldKeys));
+        localStorage.setItem('tableFieldKeys', JSON.stringify(tableFieldKeys));
       } catch(e) {}
     }
     function setMobileView(mode) {
@@ -1680,6 +1702,19 @@
       const defaults = fieldsConfig.filter(f => !f.hidden && prefer.indexOf(f.key) >= 0).map(f => f.key);
       if (defaults.length > 0) return defaults;
       return fieldsConfig.filter(f => !f.hidden).slice(0, 3).map(f => f.key);
+    }
+    // 各视图要显示的字段 key：compact 用紧凑配置；card/table 用各自配置，没配置则显示全部非隐藏字段
+    function getModeFieldKeys(mode) {
+      if (mode === 'compact') return getCompactFieldKeys();
+      const keys = (mode === 'card') ? cardFieldKeys : tableFieldKeys;
+      const valid = Array.isArray(keys) ? keys.filter(k => fieldsConfig.find(f => f.key === k)) : [];
+      if (valid.length > 0) return valid;
+      return fieldsConfig.filter(f => !f.hidden).map(f => f.key);
+    }
+    // 各视图实际渲染的字段对象（按字段设置顺序）
+    function getVisibleFields(mode) {
+      const keys = getModeFieldKeys(mode);
+      return fieldsConfig.filter(f => keys.indexOf(f.key) >= 0);
     }
     function renderCompactList() {
       const container = document.getElementById('compactList');
@@ -1755,16 +1790,20 @@
       head.innerHTML = html;
     }
     function openCompactConfig() {
-      renderCompactFieldList();
+      renderModeFieldList('compact');
+      renderModeFieldList('card');
+      renderModeFieldList('table');
       document.getElementById('compactConfigModal').classList.add('show');
     }
     function closeCompactConfig() {
       document.getElementById('compactConfigModal').classList.remove('show');
     }
-    function renderCompactFieldList() {
-      const cur = getCompactFieldKeys();
-      const container = document.getElementById('compactFieldList');
-      // 隐藏字段也列出可选（隐藏只是不在列表页显示，设置/紧凑行里照常可用）
+    // 渲染某个视图的字段勾选列表（隐藏字段也列出，带标记）
+    function renderModeFieldList(mode) {
+      const ids = { compact: 'compactFieldList', card: 'cardFieldList', table: 'tableFieldList' };
+      const container = document.getElementById(ids[mode]);
+      if (!container) return;
+      const cur = getModeFieldKeys(mode);
       container.innerHTML = fieldsConfig.map(f =>
         '<label style="display:flex;align-items:center;gap:8px;padding:7px 4px;border-bottom:1px solid #f0f0f0;font-size:14px;cursor:pointer;">' +
           '<input type="checkbox" data-ckey="' + escapeAttr(f.key) + '"' + (cur.indexOf(f.key) >= 0 ? ' checked' : '') + '> ' + escapeHtml(f.label) +
@@ -1773,10 +1812,23 @@
       ).join('');
     }
     function saveCompactConfig() {
-      compactFieldKeys = Array.prototype.map.call(document.querySelectorAll('#compactFieldList input:checked'), cb => cb.getAttribute('data-ckey'));
+      compactFieldKeys = readCheckedKeys('compactFieldList');
+      cardFieldKeys = readCheckedKeys('cardFieldList');
+      tableFieldKeys = readCheckedKeys('tableFieldList');
+      // 卡片/表格若勾选了全部非隐藏字段，视为"用默认"，以后新加字段会自动出现
+      const allVisible = fieldsConfig.filter(f => !f.hidden).map(f => f.key);
+      if (sameKeys(cardFieldKeys, allVisible)) cardFieldKeys = null;
+      if (sameKeys(tableFieldKeys, allVisible)) tableFieldKeys = null;
       saveViewSettings();
       closeCompactConfig();
       render();
+    }
+    function readCheckedKeys(listId) {
+      return Array.prototype.map.call(document.querySelectorAll('#' + listId + ' input:checked'), cb => cb.getAttribute('data-ckey'));
+    }
+    function sameKeys(a, b) {
+      if (a.length !== b.length) return false;
+      return a.every(k => b.indexOf(k) >= 0);
     }
 
     function showImgPreview(src) {
@@ -3302,7 +3354,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.08.07-14'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.08.07-15'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
