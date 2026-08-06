@@ -118,6 +118,7 @@
   .form-input, .form-select, .form-textarea { width: 100%; padding: 7px 10px; border: 1px solid #d9d9d9; border-radius: 5px; font-size: 14px; font-family: inherit; }
   .form-textarea { min-height: 70px; resize: vertical; }
   .form-row-hint { font-size: 12px; color: #999; margin-top: 3px; }
+  .hidden-field-badge { background: #f0f0f0; color: #888; padding: 1px 6px; border-radius: 8px; font-size: 11px; font-weight: normal; margin-left: 4px; vertical-align: middle; }
 
   /* 字段设置列表 */
   .field-list { list-style: none; padding: 0; margin: 0; }
@@ -228,7 +229,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.07-8</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.07-9</button>
     <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
     <button class="btn btn-secondary" onclick="openStatsConfig()">📊 统计配置</button>
@@ -1785,18 +1786,19 @@
     function buildFormHtml(idPrefix, data) {
       let html = '';
       fieldsConfig.forEach(f => {
-        if (f.hidden) return;
+        // 隐藏字段只在列表/页面上不显示，新增/编辑表单里照常可填（带"隐藏"标记提示）
+        const hiddenBadge = f.hidden ? ' <span class="hidden-field-badge">隐藏</span>' : '';
         const label = escapeHtml(f.label);
         const value = data[f.key] !== undefined ? data[f.key] : '';
         if (f.system) {
           if (value) {
-            html += '<div class="form-row"><label>' + label + '</label><div class="ctl" style="padding-top:7px;color:#666;">' + escapeHtml(formatDate(value)) + '</div></div>';
+            html += '<div class="form-row"><label>' + label + hiddenBadge + '</label><div class="ctl" style="padding-top:7px;color:#666;">' + escapeHtml(formatDate(value)) + '</div></div>';
           }
           return;
         }
         if (f.type === 'formula') {
           const result = evalFormula(f, data);
-          html += '<div class="form-row"><label>' + label + ' <span class="formula-field-badge">公式</span></label><div class="ctl" style="padding-top:7px;color:#722ed1;font-weight:500;">' + (result !== '' ? '¥ ' + escapeHtml(String(result)) : '—') + '</div></div>';
+          html += '<div class="form-row"><label>' + label + hiddenBadge + ' <span class="formula-field-badge">公式</span></label><div class="ctl" style="padding-top:7px;color:#722ed1;font-weight:500;">' + (result !== '' ? '¥ ' + escapeHtml(String(result)) : '—') + '</div></div>';
           return;
         }
         const reqHtml = f.required ? ' class="req"' : '';
@@ -1823,7 +1825,7 @@
               '</div>';
           }
         }
-        html += '<div class="form-row"><label' + reqHtml + '>' + label + '</label><div class="ctl">' + ctl + chipsHtml + '</div></div>';
+        html += '<div class="form-row"><label' + reqHtml + '>' + label + hiddenBadge + '</label><div class="ctl">' + ctl + chipsHtml + '</div></div>';
       });
       return html;
     }
@@ -3263,7 +3265,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.08.07-8'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.08.07-9'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
