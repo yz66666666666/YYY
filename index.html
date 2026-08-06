@@ -198,7 +198,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.07.30-13</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.07.30-14</button>
     <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
     <button class="btn btn-secondary" onclick="openStatsConfig()">📊 统计配置</button>
@@ -1572,7 +1572,17 @@
         }
         const reqHtml = f.required ? ' class="req"' : '';
         const ctl = renderFormControl(f, value, idPrefix);
-        html += '<div class="form-row"><label' + reqHtml + '>' + label + '</label><div class="ctl">' + ctl + '</div></div>';
+        // 默认值快捷选择（文本/数字字段，点一下填入输入框）
+        let chipsHtml = '';
+        if (f.type === 'text' || f.type === 'number') {
+          const defaults = fieldDefaults[f.key] || [];
+          if (defaults.length > 0) {
+            chipsHtml = '<div class="chips-list">' + defaults.map(v =>
+              '<div class="chip" onclick="formUseDefault(\'' + escapeAttr(f.key) + '\', \'' + escapeAttr(String(v).replace(/'/g, "\\'")) + '\')">' + escapeHtml(String(v)) + '</div>'
+            ).join('') + '</div>';
+          }
+        }
+        html += '<div class="form-row"><label' + reqHtml + '>' + label + '</label><div class="ctl">' + ctl + chipsHtml + '</div></div>';
       });
       return html;
     }
@@ -2275,6 +2285,14 @@
       if (mainInput) { mainInput.value = v; mainInput.focus(); }
     }
 
+    // 新增/编辑订单弹窗：点击默认值填入对应输入框
+    function formUseDefault(fieldKey, v) {
+      const body = document.getElementById('orderFormBody');
+      if (!body) return;
+      const el = body.querySelector('[data-field="' + fieldKey + '"]');
+      if (el) { el.value = v; el.focus(); }
+    }
+
     function closeInlineEditor() {
       document.getElementById('inlineEditor').style.display = 'none';
       document.getElementById('inlineMask').classList.remove('show');
@@ -2958,7 +2976,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.07.30-13'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.07.30-14'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
