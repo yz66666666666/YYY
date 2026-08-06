@@ -229,7 +229,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.07-9</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.07-10</button>
     <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
     <button class="btn btn-secondary" onclick="openStatsConfig()">📊 统计配置</button>
@@ -299,12 +299,6 @@
     </div>
     <div class="modal-body">
       <ul class="field-list" id="fieldsList"></ul>
-      <div style="margin:8px 0;padding:8px 10px;background:#f6ffed;border-radius:6px;font-size:12px;color:#389e0d;line-height:1.6;">
-        <b>自动生成语法：</b><br>
-        <code>{date:YYMMDD}</code> 日期 → 260730 &nbsp; <code>{date:YYYY-MM-DD}</code> → 2026-07-30<br>
-        <code>{seq:key:3}</code> 每日序号 → 001 &nbsp; <code>{time:HHmm}</code> 时间 → 1430<br>
-        例：<code>{date:YYMMDD}{seq:orderNo:3}</code> → <b>260730001</b>
-      </div>
       <div class="add-field-row">
         <input id="newFieldLabel" placeholder="字段名，如：客户名称">
         <select id="newFieldType">
@@ -2801,23 +2795,12 @@
           if (f.type !== 'textarea' && f.type !== 'select' && f.type !== 'datetime' && f.type !== 'formula') {
             html += '<button class="btn btn-secondary btn-sm" onclick="manageDefaultsClick(\'' + escapeAttr(f.key) + '\')">默认值</button>';
           }
-          // 自动生成表达式（文本和数字类型）
-          if (f.type === 'text' || f.type === 'number') {
-            html += '<div class="formula-expr" style="margin-left:8px;display:flex;align-items:center;gap:6px;">' +
-              '<span style="font-size:11px;color:#888;">自生成:</span>' +
-              '<input class="f-editable" placeholder="如 {date:YYMMDD}{seq:key:3}" value="' + escapeAttr(f.autoGen || '') + '" oninput="updateFieldAutoGen('+i+', this.value)" style="flex:1;font-size:12px;">' +
-              '</div>';
-          }
           // 删除
           html += '<button class="btn btn-danger btn-sm" onclick="deleteFieldItem('+i+')">删除</button>';
         } else {
           // 内置字段：允许改标签、改位置（拖拽）、可隐藏，但不能改类型/不能删
           if (f.key === 'orderNo') {
             html += '<button class="btn btn-secondary btn-sm" onclick="manageDefaultsClick(\'' + escapeAttr(f.key) + '\')">默认值</button>';
-            html += '<div class="formula-expr" style="margin-left:8px;display:flex;align-items:center;gap:6px;">' +
-              '<span style="font-size:11px;color:#888;">自生成:</span>' +
-              '<input class="f-editable" placeholder="如 {date:YYMMDD}{seq:No:3}" value="' + escapeAttr(f.autoGen || '') + '" oninput="updateFieldAutoGen('+i+', this.value)" style="flex:1;font-size:12px;">' +
-              '</div>';
           }
           // 隐藏（所有字段都可隐藏）
           html += '<label style="display:flex;align-items:center;gap:4px;font-size:12px;color:' + (f.hidden ? '#722ed1' : '#888') + ';">' +
@@ -3265,7 +3248,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.08.07-9'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.08.07-10'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
