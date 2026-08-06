@@ -229,7 +229,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.07-12</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.07-13</button>
     <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
     <button class="btn btn-secondary" onclick="openStatsConfig()">📊 统计配置</button>
@@ -1561,7 +1561,7 @@
       let html = '';
       list.forEach(o => {
         const checked = selectedOrders.has(o.id) ? 'checked' : '';
-        html += '<tr>';
+        html += '<tr data-id="' + escapeAttr(o.id) + '">';
         html += '<td class="checkbox-cell"><input type="checkbox" ' + checked + ' onchange="toggleSelectOrder(\'' + escapeAttr(o.id) + '\', this.checked)"></td>';
         visibleFields.forEach(f => {
           const cellHtml = renderCellValue(f, o);
@@ -1590,7 +1590,7 @@
       let html = '';
       list.forEach(o => {
         const checked = selectedOrders.has(o.id) ? 'checked' : '';
-        html += '<div class="card">';
+        html += '<div class="card" data-id="' + escapeAttr(o.id) + '">';
         html += '<div class="card-checkbox"><input type="checkbox" ' + checked + ' onchange="toggleSelectOrder(\'' + escapeAttr(o.id) + '\', this.checked)"> 选择此订单</div>';
         html += '<div class="card-header">';
         html += '<div class="card-title">' + escapeHtml(getDisplayText(fieldsConfig[0] || {label:'订单'}, o[fieldsConfig[0] ? fieldsConfig[0].key : 'orderNo']) || '订单') + '</div>';
@@ -1635,11 +1635,39 @@
       } catch(e) {}
     }
     function setMobileView(mode) {
+      // 切换前记住屏幕中心的订单，切换后把它滚回屏幕中心，避免跳到页面顶部
+      const centerId = findCenterOrderId();
       mobileViewMode = mode;
       saveViewSettings();
       document.body.setAttribute('data-mview', mode);
       updateViewSwitchButtons();
       render();
+      if (centerId) {
+        requestAnimationFrame(function() {
+          requestAnimationFrame(function() { restoreCenterOrder(centerId); });
+        });
+      }
+    }
+    // 找到当前视口垂直中心附近的那一个订单行（表格行/卡片/紧凑行都算）
+    function findCenterOrderId() {
+      const centerY = window.scrollY + window.innerHeight / 2;
+      let bestId = null, bestDist = Infinity;
+      Array.prototype.forEach.call(document.querySelectorAll('#ordersTbody tr[data-id], #cardList .card[data-id], #compactList .compact-row[data-id]'), function(el) {
+        if (el.offsetParent === null) return; // 非当前可见视图的行跳过
+        const rect = el.getBoundingClientRect();
+        const elCenter = rect.top + rect.height / 2;
+        const dist = Math.abs(elCenter - centerY);
+        if (dist < bestDist) { bestDist = dist; bestId = el.getAttribute('data-id'); }
+      });
+      return bestId;
+    }
+    // 把指定订单滚回屏幕垂直中心
+    function restoreCenterOrder(id) {
+      const el = document.querySelector('#compactList .compact-row[data-id="' + id + '"], #cardList .card[data-id="' + id + '"], #ordersTbody tr[data-id="' + id + '"]');
+      if (!el || el.offsetParent === null) return;
+      const rect = el.getBoundingClientRect();
+      const target = rect.top + rect.height / 2 - window.innerHeight / 2;
+      window.scrollTo(0, window.scrollY + target);
     }
     function updateViewSwitchButtons() {
       document.querySelectorAll('.view-switch-btn[data-mview]').forEach(b => {
@@ -3276,7 +3304,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.08.07-12'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.08.07-13'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
