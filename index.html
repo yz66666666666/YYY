@@ -232,7 +232,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.07-17</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.07-18</button>
     <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
     <button class="btn btn-secondary" onclick="openStatsConfig()">📊 统计配置</button>
@@ -1210,9 +1210,10 @@
           if (v === null || v === undefined || v === '') numVal = 0;
           else if (typeof v === 'number') numVal = v;
           else numVal = parseFloat(String(v)) || 0;
-          if (f.key) substitutions[f.key] = '(' + numVal + ')';
+          // 用纯数字替换（不带括号，否则会破坏 round() 等函数参数的括号匹配）
+          if (f.key) substitutions[f.key] = String(numVal);
           if (f.label && f.label !== f.key) {
-            substitutions[f.label] = '(' + numVal + ')';
+            substitutions[f.label] = String(numVal);
           }
         });
         // 按长度从长到短排序，避免短的先被替换
@@ -1227,24 +1228,39 @@
         // 处理 round(), abs(), ceil(), floor() 函数
         const funcStack = [];
         let funcIdx = 0;
-        // 先提取所有函数调用（从内到外）
+        // 从内到外提取函数调用。参数里可能含用户写的括号（如 round((价格-成本)/价格*100, 2)），需要数括号配对，不能只用正则 [^()]*
         while (true) {
-          // 查找最内层的 func(...) 不含其他函数
-          const funcMatch = expr.match(/(round|abs|ceil|floor)\(([^()]*)\)/);
-          if (!funcMatch) break;
-          const funcName = funcMatch[1];
-          const inner = funcMatch[2];
-          const placeholder = '__FUNC_' + funcIdx + '__';
-          funcStack.push({ func: funcName, args: inner });
-          expr = expr.substring(0, funcMatch.index) + placeholder + expr.substring(funcMatch.index + funcMatch[0].length);
+          const reF = /(round|abs|ceil|floor)\(/g;
+          const candidates = [];
+          let mm;
+          while ((mm = reF.exec(expr))) candidates.push({ fn: mm[1], idx: mm.index });
+          if (candidates.length === 0) break;
+          // 从后往前找"参数内不含其他函数"的最内层调用
+          let chosen = null;
+          for (let ci = candidates.length - 1; ci >= 0; ci--) {
+            const c = candidates[ci];
+            const openIdx = c.idx + c.fn.length;
+            let depth = 0, j = openIdx;
+            for (; j < expr.length; j++) {
+              if (expr[j] === '(') depth++;
+              else if (expr[j] === ')') { depth--; if (depth === 0) break; }
+            }
+            if (j >= expr.length) continue;
+            const inner = expr.substring(openIdx + 1, j);
+            if (!/(round|abs|ceil|floor)\s*\(/.test(inner)) { chosen = { c: c, j: j, inner: inner }; break; }
+          }
+          if (!chosen) break;
+          const placeholder = '___' + funcIdx + '___'; // 只用下划线+数字，字母会被后面的字符过滤清除
+          funcStack.push({ func: chosen.c.fn, args: chosen.inner });
+          expr = expr.substring(0, chosen.c.idx) + placeholder + expr.substring(chosen.j + 1);
           funcIdx++;
         }
-        // 清除剩余不允许的字符（保留占位符中的下划线和数字）
-        expr = expr.replace(/[^0-9+\-*/().\s_]/g, '').trim();
+        // 清除剩余不允许的字符（保留占位符中的下划线和数字，以及函数参数分隔逗号）
+        expr = expr.replace(/[^0-9+\-*/().\s_,]/g, '').trim();
         // 恢复函数占位符
         for (let i = funcStack.length - 1; i >= 0; i--) {
           const item = funcStack[i];
-          const placeholder = '__FUNC_' + i + '__';
+          const placeholder = '___' + i + '___';
           // 计算内部表达式
           let args = item.args;
           // 对内部表达式做同样的字段替换（如果有的话）
@@ -1257,11 +1273,11 @@
           }
           // 恢复内部的函数占位符
           for (let j = funcStack.length - 1; j >= 0; j--) {
-            const ph = '__FUNC_' + j + '__';
+            const ph = '___' + j + '___';
             args = args.split(ph).join('0');
           }
-          // 计算
-          args = args.replace(/[^0-9+\-*/().\s_]/g, '').trim();
+          // 计算（保留逗号分隔参数）
+          args = args.replace(/[^0-9+\-*/().\s_,]/g, '').trim();
           const argParts = splitArgs(args);
           const computedArgs = argParts.map(a => {
             a = a.trim();
@@ -3686,7 +3702,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.08.07-17'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.08.07-18'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
