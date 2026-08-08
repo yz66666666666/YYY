@@ -232,7 +232,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.09-1</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.09-2</button>
     <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
     <button class="btn btn-secondary" onclick="openStatsConfig()">📊 统计配置</button>
@@ -427,6 +427,22 @@
     <div class="modal-ftr">
       <button class="btn btn-secondary" onclick="closeGroupFormulaModal()">取消</button>
       <button class="btn btn-primary" onclick="saveGroupFormulaConfig()">保存配置</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 公式计算过程弹窗 ============ -->
+<div class="modal-mask" id="formulaDetailModal">
+  <div class="modal modal-md">
+    <div class="modal-hdr">
+      <h3 id="formulaDetailTitle">计算过程</h3>
+      <button class="close-x" onclick="closeModal('formulaDetailModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div id="formulaDetailSteps"></div>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-primary" onclick="closeModal('formulaDetailModal')">知道了</button>
     </div>
   </div>
 </div>
@@ -1202,6 +1218,12 @@
       }
       try {
         let expr = field.formula.trim();
+        // 自动把中文全角符号转成英文半角，避免误用全角符号导致计算失败
+        expr = expr
+          .replace(/（/g, '(').replace(/）/g, ')')
+          .replace(/×/g, '*').replace(/÷/g, '/')
+          .replace(/－/g, '-').replace(/＋/g, '+')
+          .replace(/，/g, ',').replace(/。/g, '.');
         // 同时支持英文名(key)和中文名(label)
         const substitutions = {};
         fieldsConfig.forEach(f => {
@@ -1672,9 +1694,10 @@
         visibleFields.forEach(f => {
           const cellHtml = renderCellValue(f, o);
           const isFormula = f.type === 'formula';
-          const clickable = isFormula ? '' : 'clickable';
-          const onclick = isFormula ? '' : 'onclick="startInlineEdit(this, \'' + escapeAttr(o.id) + '\', \'' + escapeAttr(f.key) + '\')"';
-          html += '<td class="' + clickable + '" ' + onclick + '>' + cellHtml + '</td>';
+          const onclick = isFormula
+            ? 'onclick="showFormulaDetail(\'' + escapeAttr(o.id) + '\', \'' + escapeAttr(f.key) + '\')" title="点击查看计算过程"'
+            : 'onclick="startInlineEdit(this, \'' + escapeAttr(o.id) + '\', \'' + escapeAttr(f.key) + '\')"';
+          html += '<td class="clickable" ' + onclick + '>' + cellHtml + '</td>';
         });
         html += '<td class="actions-cell">' +
           '<button class="btn btn-secondary btn-sm" onclick="editOrder(\'' + escapeAttr(o.id) + '\')">编辑</button>' +
@@ -1708,11 +1731,12 @@
           const label = escapeHtml(f.label);
           const valHtml = renderCellValue(f, o);
           const isFormula = f.type === 'formula';
-          const clickable = isFormula ? '' : 'card-value';
-          const onclick = isFormula ? '' : 'onclick="startInlineEdit(this, \'' + escapeAttr(o.id) + '\', \'' + escapeAttr(f.key) + '\')"';
+          const onclick = isFormula
+            ? 'onclick="showFormulaDetail(\'' + escapeAttr(o.id) + '\', \'' + escapeAttr(f.key) + '\')" title="点击查看计算过程"'
+            : 'onclick="startInlineEdit(this, \'' + escapeAttr(o.id) + '\', \'' + escapeAttr(f.key) + '\')"';
           html += '<div class="card-row">' +
             '<div class="card-label">' + label + '</div>' +
-            '<div class="' + clickable + '" ' + onclick + '>' + valHtml + '</div>' +
+            '<div class="card-value" ' + onclick + '>' + valHtml + '</div>' +
             '</div>';
         });
         html += '</div>';
@@ -1826,8 +1850,10 @@
         html += '<div class="compact-cells">';
         keyFields.forEach(f => {
           const isFormula = f.type === 'formula';
-          const onclick = isFormula ? '' : 'onclick="startInlineEdit(this, \'' + escapeAttr(o.id) + '\', \'' + escapeAttr(f.key) + '\')"';
-          html += '<div class="compact-cell" ' + onclick + ' title="' + escapeHtml(f.label) + '">' + renderCellValue(f, o) + '</div>';
+          const onclick = isFormula
+            ? 'onclick="showFormulaDetail(\'' + escapeAttr(o.id) + '\', \'' + escapeAttr(f.key) + '\')"'
+            : 'onclick="startInlineEdit(this, \'' + escapeAttr(o.id) + '\', \'' + escapeAttr(f.key) + '\')"';
+          html += '<div class="compact-cell" ' + onclick + ' title="' + (isFormula ? escapeHtml(f.label) + '（点击查看计算过程）' : escapeHtml(f.label)) + '">' + renderCellValue(f, o) + '</div>';
         });
         html += '</div>';
         html += '</div>';
@@ -3258,6 +3284,124 @@
       closeGroupFormulaModal();
       saveData('修改公式分组配置');
       render();
+      showToast(enabled ? '✅ 分组公式已保存，列表已按分组计算' : '已关闭分组公式');
+    }
+
+    // ============ 公式计算过程展示（点击公式字段单元格） ============
+    function showFormulaDetail(orderId, fieldKey) {
+      const field = fieldsConfig.find(f => f.key === fieldKey);
+      const order = orders.find(o => o.id === orderId);
+      if (!field || !order || field.type !== 'formula') return;
+      const d = explainFormula(field, order);
+      document.getElementById('formulaDetailTitle').innerText = field.label + ' 计算过程';
+      let html = '';
+      if (d.note) html += '<div style="margin-bottom:10px;padding:8px 10px;background:#e6fffb;border:1px solid #87e8de;border-radius:6px;font-size:13px;color:#006d75;">' + d.note + '</div>';
+      d.steps.forEach((s, idx) => {
+        const isLast = idx === d.steps.length - 1;
+        html += '<div style="padding:8px 12px;margin-bottom:6px;background:' + (isLast ? '#f6ffed' : '#fafafa') + ';border:1px solid ' + (isLast ? '#b7eb8f' : '#eee') + ';border-radius:6px;font-family:monospace;font-size:14px;color:#333;">' +
+          '<div style="font-size:11px;color:#999;margin-bottom:2px;">' + escapeHtml(s.label) + '</div>' +
+          '<div>' + escapeHtml(s.expr) +
+          (isLast ? ' <span style="color:#52c41a;font-weight:bold;">= ' + escapeHtml(String(d.result)) + '</span>' : '') +
+          '</div></div>';
+      });
+      if (d.result === '' || d.result === null || d.result === undefined) {
+        html += '<div style="padding:10px;color:#fa541c;font-size:13px;">⚠ 无法计算出结果。请检查：公式里的字段名是否正确、数值是否填写、符号是否为英文半角。</div>';
+      }
+      document.getElementById('formulaDetailSteps').innerHTML = html;
+      document.getElementById('formulaDetailModal').classList.add('show');
+    }
+    function explainFormula(field, order) {
+      let usedFormula = field.formula || '';
+      let note = '';
+      if (field.groupEnabled && field.groupField && field.groupRules) {
+        const gv = String(order[field.groupField] === null || order[field.groupField] === undefined ? '' : order[field.groupField]);
+        const matched = gv !== '' && field.groupRules[gv] !== undefined ? String(field.groupRules[gv]) : '';
+        if (matched.trim() !== '') {
+          usedFormula = matched;
+          const gf = fieldsConfig.find(x => x.key === field.groupField);
+          note = '按「' + (gf ? gf.label : field.groupField) + '」= ' + (gv === '' ? '（空）' : (gf ? getDisplayText(gf, gv) : gv)) + '，使用该分组公式';
+        } else {
+          note = '没有匹配到分组公式，使用默认公式';
+        }
+      }
+      const steps = [];
+      steps.push({ label: '公式', expr: usedFormula.trim() });
+      let expr = usedFormula.trim()
+        .replace(/（/g, '(').replace(/）/g, ')')
+        .replace(/×/g, '*').replace(/÷/g, '/')
+        .replace(/－/g, '-').replace(/＋/g, '+')
+        .replace(/，/g, ',').replace(/。/g, '.');
+      // 代入数值
+      const sub = {};
+      fieldsConfig.forEach(f => {
+        const v = order[f.key];
+        let n = 0;
+        if (v !== null && v !== undefined && v !== '') n = (typeof v === 'number') ? v : (parseFloat(String(v)) || 0);
+        if (f.key) sub[f.key] = n;
+        if (f.label && f.label !== f.key) sub[f.label] = n;
+      });
+      const keys = Object.keys(sub).sort((a, b) => b.length - a.length);
+      let replaced = expr;
+      for (const k of keys) {
+        if (/^[a-zA-Z_]/.test(k)) replaced = replaced.replace(new RegExp('\\b' + k + '\\b', 'g'), String(sub[k]));
+        else replaced = replaced.split(k).join(String(sub[k]));
+      }
+      steps.push({ label: '代入数值', expr: replaced });
+      const simplified = simplifyExprSteps(replaced);
+      simplified.forEach((s, idx) => {
+        steps.push({ label: idx === simplified.length - 1 ? '最终结果' : '逐步计算', expr: s });
+      });
+      const result = evalFormula(field, order);
+      return { note: note, steps: steps, result: result };
+    }
+    function simplifyExprSteps(expr) {
+      const steps = [];
+      let cur = expr;
+      let guard = 0;
+      while (guard++ < 50) {
+        // 先处理函数（取最内层）
+        let m = cur.match(/(round|abs|ceil|floor)\(([^()]*)\)/);
+        if (m) {
+          const parts = splitArgs(m[2]);
+          const nums = parts.map(p => {
+            const t = p.trim();
+            if (!t) return 0;
+            try { const v = Function('"use strict";return (' + t + ')')(); return (v === undefined || isNaN(v) || !isFinite(v)) ? 0 : v; } catch (e) { return 0; }
+          });
+          let val;
+          const fn = m[1];
+          if (fn === 'round') { const dec = parseInt(nums[1]) || 0; const f = Math.pow(10, dec); val = Math.round((parseFloat(nums[0]) || 0) * f) / f; }
+          else if (fn === 'abs') val = Math.abs(parseFloat(nums[0]) || 0);
+          else if (fn === 'ceil') val = Math.ceil(parseFloat(nums[0]) || 0);
+          else val = Math.floor(parseFloat(nums[0]) || 0);
+          val = Math.round(val * 100) / 100;
+          cur = cur.substring(0, m.index) + String(val) + cur.substring(m.index + m[0].length);
+          steps.push(cur);
+          continue;
+        }
+        // 再处理括号
+        m = cur.match(/\(([^()]*)\)/);
+        if (m) {
+          const t = m[1].trim();
+          try {
+            const v = Function('"use strict";return (' + t + ')')();
+            if (v === undefined || isNaN(v) || !isFinite(v)) break;
+            const r = Math.round(v * 100) / 100;
+            cur = cur.substring(0, m.index) + String(r) + cur.substring(m.index + m[0].length);
+            steps.push(cur);
+            continue;
+          } catch (e) { break; }
+        }
+        // 最后整体求值
+        try {
+          const v = Function('"use strict";return (' + cur + ')')();
+          if (v === undefined || isNaN(v) || !isFinite(v)) break;
+          const r = Math.round(v * 100) / 100;
+          if (String(r) !== cur) { cur = String(r); steps.push(cur); }
+        } catch (e) {}
+        break;
+      }
+      return steps;
     }
 
     function openFormulaHelp() {
@@ -3702,7 +3846,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.08.09-1'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.08.09-2'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
