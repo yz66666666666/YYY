@@ -232,7 +232,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.09-3</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.09-4</button>
     <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
     <button class="btn btn-secondary" onclick="openStatsConfig()">📊 统计配置</button>
@@ -1206,14 +1206,16 @@
     }
 
     // ============ 公式求值 ============
-    function evalFormula(field, order) {
+    function evalFormula(field, order, _depth) {
+      const depth = _depth || 0;
+      if (depth > 10) return ''; // 防止公式互相引用形成死循环
       if (!field || field.type !== 'formula') return '';
       // 分组公式优先：按分组字段的当前值，套用对应的子公式（即使主公式为空也能按分组计算）
       if (field.groupEnabled && field.groupField && field.groupRules) {
         const gv = String(order[field.groupField] === null || order[field.groupField] === undefined ? '' : order[field.groupField]);
         const matched = gv !== '' && field.groupRules[gv] !== undefined ? String(field.groupRules[gv]) : '';
         if (matched.trim() !== '') {
-          return evalFormula({ type: 'formula', formula: matched }, order);
+          return evalFormula({ type: 'formula', formula: matched }, order, depth + 1);
         }
       }
       // 无匹配分组时，用主公式兜底（主公式可为空，此时返回空）
@@ -1229,11 +1231,15 @@
         // 同时支持英文名(key)和中文名(label)
         const substitutions = {};
         fieldsConfig.forEach(f => {
-          const v = order[f.key];
           let numVal = 0;
-          if (v === null || v === undefined || v === '') numVal = 0;
-          else if (typeof v === 'number') numVal = v;
-          else numVal = parseFloat(String(v)) || 0;
+          if (f.type === 'formula') {
+            // 公式字段：订单里不存数值，需递归计算其当前值（含分组）
+            const fv = evalFormula(f, order, depth + 1);
+            if (fv !== '' && fv !== null && fv !== undefined) numVal = parseFloat(String(fv)) || 0;
+          } else {
+            const v = order[f.key];
+            if (v !== null && v !== undefined && v !== '') numVal = (typeof v === 'number') ? v : (parseFloat(String(v)) || 0);
+          }
           // 用纯数字替换（不带括号，否则会破坏 round() 等函数参数的括号匹配）
           if (f.key) substitutions[f.key] = String(numVal);
           if (f.label && f.label !== f.key) {
@@ -3336,9 +3342,14 @@
       // 代入数值
       const sub = {};
       fieldsConfig.forEach(f => {
-        const v = order[f.key];
         let n = 0;
-        if (v !== null && v !== undefined && v !== '') n = (typeof v === 'number') ? v : (parseFloat(String(v)) || 0);
+        if (f.type === 'formula') {
+          const fv = evalFormula(f, order);
+          if (fv !== '' && fv !== null && fv !== undefined) n = parseFloat(String(fv)) || 0;
+        } else {
+          const v = order[f.key];
+          if (v !== null && v !== undefined && v !== '') n = (typeof v === 'number') ? v : (parseFloat(String(v)) || 0);
+        }
         if (f.key) sub[f.key] = n;
         if (f.label && f.label !== f.key) sub[f.label] = n;
       });
@@ -3848,7 +3859,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.08.09-3'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.08.09-4'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
