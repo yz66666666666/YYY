@@ -232,7 +232,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.07-16</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.07-17</button>
     <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
     <button class="btn btn-secondary" onclick="openStatsConfig()">📊 统计配置</button>
@@ -398,6 +398,39 @@
   </div>
 </div>
 
+<!-- ============ 分组公式配置弹窗 ============ -->
+<div class="modal-mask" id="groupFormulaModal">
+  <div class="modal modal-md">
+    <div class="modal-hdr">
+      <h3 id="groupFormulaTitle">分组公式配置</h3>
+      <button class="close-x" onclick="closeGroupFormulaModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div style="margin-bottom:10px;color:#555;font-size:13px;">按某个字段的值不同，套用不同的计算公式。例如利润按"来源"分：淘宝、拼多多、微信各一套公式。订单中该字段无匹配值时，使用字段的默认公式。</div>
+      <div class="ctl" style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;">
+          <input type="checkbox" id="groupFormulaEnabled" onchange="renderGroupFormulaModal()"> 启用按字段分组计算
+        </label>
+      </div>
+      <div id="groupFormulaArea" style="display:none;">
+        <div class="ctl" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <span style="font-size:12px;color:#555;flex:0 0 auto;">分组字段</span>
+          <select id="groupFormulaField" class="form-input" onchange="renderGroupFormulaRules()"></select>
+        </div>
+        <div id="groupFormulaRules" style="margin-bottom:4px;"></div>
+        <button class="btn btn-secondary btn-sm" id="groupFormulaAddRowBtn" onclick="addGroupFormulaRow()">+ 添加一个条件</button>
+        <div style="margin-top:10px;padding:8px 10px;background:#fffbe6;border:1px solid #ffe58f;border-radius:6px;font-size:12px;color:#ad6800;">
+          无匹配时使用字段默认公式：<code id="groupFormulaDefaultHint">—</code>
+        </div>
+      </div>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-secondary" onclick="closeGroupFormulaModal()">取消</button>
+      <button class="btn btn-primary" onclick="saveGroupFormulaConfig()">保存配置</button>
+    </div>
+  </div>
+</div>
+
 <!-- ============ 同步设置弹窗 ============ -->
 <div class="modal-mask" id="syncModal">
   <div class="modal modal-md">
@@ -494,6 +527,7 @@
           <div>💰 <b>含税金额</b>：<code style="background:#f5f5f5;padding:2px 6px;border-radius:3px;">round(价格 + 价格 * 税率, 2)</code></div>
           <div>🎯 <b>打折价</b>（8折）：<code style="background:#f5f5f5;padding:2px 6px;border-radius:3px;">round(价格 * 0.8, 2)</code></div>
           <div>📊 <b>利润率</b>：<code style="background:#f5f5f5;padding:2px 6px;border-radius:3px;">round((价格 - 成本) / 价格 * 100, 2)</code></div>
+          <div>🔀 <b>按字段分组计算</b>：在"字段设置"里点公式字段旁的<b>分组</b>按钮，可按某个字段（如"来源"）的不同值各配一套公式，列表、统计、批量计算都会自动按分组计算。</div>
         </div>
       </div>
     </div>
@@ -514,30 +548,50 @@
       <div style="margin-bottom:12px;color:#555;font-size:13px;">
         对已选中的 <b id="batchCalcCount">0</b> 个订单进行公式计算。点击预设填入公式，或手动输入。
       </div>
-      <!-- 预设公式区 -->
-      <div style="margin-bottom:10px;">
-        <div style="display:flex;align-items:center;margin-bottom:6px;">
-          <span style="font-size:12px;color:#888;">快捷预设</span>
-          <span style="flex:1;"></span>
-          <span class="btn btn-secondary btn-sm" onclick="openPresetEditor(-1)">+ 新增预设</span>
-        </div>
-        <div id="batchPresets" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+      <div style="display:flex;gap:8px;margin-bottom:12px;">
+        <span class="btn btn-secondary btn-sm" id="batchModeNormalBtn" onclick="setBatchCalcMode('normal')">✎ 普通公式</span>
+        <span class="btn btn-secondary btn-sm" id="batchModeGroupBtn" onclick="setBatchCalcMode('group')">⇉ 分组公式</span>
       </div>
-      <!-- 历史记录区 -->
-      <div style="margin-bottom:12px;border-top:1px dashed #e8e8e8;padding-top:10px;">
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
-          <span style="font-size:12px;color:#888;">最近使用</span>
-          <span style="flex:1;"></span>
-          <span id="historyMoreBtn" style="font-size:11px;color:#1677ff;cursor:pointer;display:none;" onclick="toggleCalcHistory()">展开历史 ▼</span>
-          <span id="historyLessBtn" style="font-size:11px;color:#1677ff;cursor:pointer;display:none;" onclick="toggleCalcHistory()">收起 ▲</span>
-          <span id="historyClearBtn" style="font-size:11px;color:#999;cursor:pointer;" onclick="clearCalcHistory()">清空</span>
+      <div id="batchCalcNormalArea">
+        <!-- 预设公式区 -->
+        <div style="margin-bottom:10px;">
+          <div style="display:flex;align-items:center;margin-bottom:6px;">
+            <span style="font-size:12px;color:#888;">快捷预设</span>
+            <span style="flex:1;"></span>
+            <span class="btn btn-secondary btn-sm" onclick="openPresetEditor(-1)">+ 新增预设</span>
+          </div>
+          <div id="batchPresets" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
         </div>
-        <div id="batchHistory" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+        <!-- 历史记录区 -->
+        <div style="margin-bottom:12px;border-top:1px dashed #e8e8e8;padding-top:10px;">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+            <span style="font-size:12px;color:#888;">最近使用</span>
+            <span style="flex:1;"></span>
+            <span id="historyMoreBtn" style="font-size:11px;color:#1677ff;cursor:pointer;display:none;" onclick="toggleCalcHistory()">展开历史 ▼</span>
+            <span id="historyLessBtn" style="font-size:11px;color:#1677ff;cursor:pointer;display:none;" onclick="toggleCalcHistory()">收起 ▲</span>
+            <span id="historyClearBtn" style="font-size:11px;color:#999;cursor:pointer;" onclick="clearCalcHistory()">清空</span>
+          </div>
+          <div id="batchHistory" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
+          <input id="batchCalcFormula" placeholder="如 价格*2 或 round(价格*税率,2)" style="flex:1;padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:14px;" onkeydown="if(event.key==='Enter')execBatchCalc()">
+          <button class="btn btn-secondary btn-sm" onclick="openFormulaHelp()">?</button>
+          <button class="btn btn-primary" onclick="execBatchCalc()">计算</button>
+        </div>
       </div>
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
-        <input id="batchCalcFormula" placeholder="如 价格*2 或 round(价格*税率,2)" style="flex:1;padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:14px;" onkeydown="if(event.key==='Enter')execBatchCalc()">
-        <button class="btn btn-secondary btn-sm" onclick="openFormulaHelp()">?</button>
-        <button class="btn btn-primary" onclick="execBatchCalc()">计算</button>
+      <!-- 分组公式模式 -->
+      <div id="batchGroupArea" style="display:none;margin-bottom:12px;padding:12px;background:#fafafa;border:1px solid #eee;border-radius:6px;">
+        <div style="margin-bottom:8px;font-size:13px;color:#333;">订单的该字段值不同，套用不同的公式计算。空白的选项会使用"默认公式"。</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <span style="font-size:12px;color:#555;flex:0 0 auto;">分组字段</span>
+          <select id="batchGroupField" class="form-input" style="flex:1;" onchange="renderBatchGroupRules()"></select>
+        </div>
+        <div id="batchGroupRules" style="margin-bottom:10px;"></div>
+        <div style="margin-bottom:6px;font-size:12px;color:#555;">其他情况（默认公式）：</div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input id="batchGroupDefaultFormula" class="form-input" placeholder="如 价格-成本" style="flex:1;">
+          <button class="btn btn-primary" onclick="execBatchCalc()">计算</button>
+        </div>
       </div>
       <div id="batchCalcResults" style="max-height:40vh;overflow-y:auto;"></div>
     </div>
@@ -1138,6 +1192,14 @@
     // ============ 公式求值 ============
     function evalFormula(field, order) {
       if (!field || field.type !== 'formula' || !field.formula) return '';
+      // 分组公式：按分组字段的当前值，套用对应的子公式（无匹配时走默认 formula）
+      if (field.groupEnabled && field.groupField && field.groupRules) {
+        const gv = String(order[field.groupField] === null || order[field.groupField] === undefined ? '' : order[field.groupField]);
+        const matched = gv !== '' && field.groupRules[gv] !== undefined ? String(field.groupRules[gv]) : '';
+        if (matched.trim() !== '') {
+          return evalFormula({ type: 'formula', formula: matched }, order);
+        }
+      }
       try {
         let expr = field.formula.trim();
         // 同时支持英文名(key)和中文名(label)
@@ -2262,6 +2324,7 @@
     function openBatchCalc() {
       const count = selectedOrders.size;
       if (count === 0) return;
+      setBatchCalcMode('normal');
       document.getElementById('batchCalcCount').innerText = count;
       document.getElementById('batchCalcResults').innerHTML = '';
       const historyEl = document.getElementById('batchHistory');
@@ -2397,7 +2460,149 @@
       if (calcHistory.length > 10) calcHistory.length = 10;
       localStorage.setItem('batchCalcHistory', JSON.stringify(calcHistory));
     }
+    // ============ 批量计算器：分组公式模式 ============
+    let batchCalcMode = 'normal';
+    let tempBatchRules = []; // [{value, formula}] 非下拉字段的手动规则
+    function setBatchCalcMode(mode) {
+      batchCalcMode = mode;
+      document.getElementById('batchCalcNormalArea').style.display = mode === 'normal' ? '' : 'none';
+      document.getElementById('batchGroupArea').style.display = mode === 'group' ? '' : 'none';
+      const nBtn = document.getElementById('batchModeNormalBtn');
+      const gBtn = document.getElementById('batchModeGroupBtn');
+      nBtn.style.background = mode === 'normal' ? '#1677ff' : '';
+      nBtn.style.color = mode === 'normal' ? '#fff' : '';
+      gBtn.style.background = mode === 'group' ? '#1677ff' : '';
+      gBtn.style.color = mode === 'group' ? '#fff' : '';
+      if (mode === 'group') {
+        const sel = document.getElementById('batchGroupField');
+        const opts = fieldsConfig.filter(x => x.type !== 'formula');
+        sel.innerHTML = '<option value="">-- 选择分组字段 --</option>' + opts.map(x =>
+          '<option value="' + escapeAttr(x.key) + '">' + escapeHtml(x.label) + '（' + escapeHtml(x.key) + '）</option>'
+        ).join('');
+        renderBatchGroupRules();
+      }
+    }
+    function renderBatchGroupRules() {
+      const fieldKey = document.getElementById('batchGroupField').value;
+      const fieldDef = fieldsConfig.find(x => x.key === fieldKey);
+      const container = document.getElementById('batchGroupRules');
+      if (!fieldDef) {
+        container.innerHTML = '<div style="color:#bbb;font-size:12px;">请先选择分组字段</div>';
+        return;
+      }
+      if (fieldDef.type === 'select' && fieldDef.options && fieldDef.options.length) {
+        let html = '';
+        fieldDef.options.forEach(o => {
+          html += '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">' +
+            '<span style="flex:0 0 80px;font-size:13px;color:#333;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeAttr(o.label) + '">' + escapeHtml(o.label) + '</span>' +
+            '<input class="form-input" style="flex:1;" data-grp-value="' + escapeAttr(o.value) + '" placeholder="该选项的公式，如 价格*0.9-成本">' +
+            '</div>';
+        });
+        container.innerHTML = html;
+      } else {
+        container.innerHTML =
+          '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">' +
+          '<input class="form-input" style="flex:0 0 100px;" id="batchRuleValInput" placeholder="字段值">' +
+          '<input class="form-input" style="flex:1;" id="batchRuleFormulaInput" placeholder="该值的公式">' +
+          '<button class="btn btn-secondary btn-sm" onclick="addBatchGroupRule()">添加</button>' +
+          '</div><div id="batchRuleList"></div>';
+        renderBatchRuleList();
+      }
+    }
+    function addBatchGroupRule() {
+      const v = document.getElementById('batchRuleValInput').value.trim();
+      const f = document.getElementById('batchRuleFormulaInput').value.trim();
+      if (!v || !f) return;
+      tempBatchRules.push({ value: v, formula: f });
+      document.getElementById('batchRuleValInput').value = '';
+      document.getElementById('batchRuleFormulaInput').value = '';
+      renderBatchRuleList();
+    }
+    function renderBatchRuleList() {
+      const el = document.getElementById('batchRuleList');
+      if (!el) return;
+      let html = '';
+      tempBatchRules.forEach((r, idx) => {
+        html += '<div style="display:flex;gap:6px;align-items:center;margin-bottom:4px;">' +
+          '<span style="flex:0 0 100px;font-size:12px;color:#333;">' + escapeHtml(r.value) + '</span>' +
+          '<span style="flex:1;font-size:12px;color:#888;">' + escapeHtml(r.formula) + '</span>' +
+          '<button class="btn btn-danger btn-sm" onclick="tempBatchRules.splice('+idx+',1);renderBatchRuleList()">×</button>' +
+          '</div>';
+      });
+      el.innerHTML = html || '<div style="color:#bbb;font-size:12px;">暂无规则，输入字段值和公式后点击"添加"</div>';
+    }
+    function collectBatchGroupRules() {
+      const rules = {};
+      const fieldKey = document.getElementById('batchGroupField').value;
+      const fieldDef = fieldsConfig.find(x => x.key === fieldKey);
+      if (fieldDef && fieldDef.type === 'select') {
+        document.querySelectorAll('#batchGroupRules [data-grp-value]').forEach(inp => {
+          const v = inp.dataset.grpValue;
+          const formula = inp.value.trim();
+          if (formula) rules[v] = formula;
+        });
+      } else {
+        tempBatchRules.forEach(r => {
+          if (r.value && String(r.formula).trim()) rules[r.value] = String(r.formula).trim();
+        });
+      }
+      return rules;
+    }
+    function execBatchCalcGroup() {
+      const fieldKey = document.getElementById('batchGroupField').value;
+      if (!fieldKey) { alert('请先选择分组字段'); return; }
+      const fieldDef = fieldsConfig.find(x => x.key === fieldKey);
+      if (!fieldDef) return;
+      const rules = collectBatchGroupRules();
+      const defaultFormula = document.getElementById('batchGroupDefaultFormula').value.trim();
+      const selectedList = getSelectedOrders();
+      if (selectedList.length === 0) return;
+      let html = '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
+      html += '<tr style="background:#f5f5f5;"><th style="padding:6px 10px;text-align:left;border:1px solid #e8e8e8;">订单</th><th style="padding:6px 10px;text-align:left;border:1px solid #e8e8e8;">' + escapeHtml(fieldDef.label) + '</th><th style="padding:6px 10px;text-align:right;border:1px solid #e8e8e8;">计算结果</th></tr>';
+      let sum = 0;
+      let validCount = 0;
+      const results = [];
+      selectedList.forEach(o => {
+        const gv = String(o[fieldKey] === null || o[fieldKey] === undefined ? '' : o[fieldKey]);
+        let formula = rules[gv];
+        if (!formula || !String(formula).trim()) formula = defaultFormula;
+        let result = '';
+        if (formula && String(formula).trim()) {
+          result = evalFormula({ type: 'formula', formula: String(formula) }, o);
+        }
+        results.push(result);
+        const orderLabel = escapeHtml(getDisplayText(fieldsConfig[0] || {label:'订单'}, o[fieldsConfig[0] ? fieldsConfig[0].key : 'orderNo']) || o.id);
+        const gvDisplay = escapeHtml(getDisplayText(fieldDef, o[fieldKey]) || '—');
+        let displayResult;
+        if (result === '' || result === null || result === undefined) {
+          displayResult = '<span style="color:#bbb;">—</span>';
+        } else {
+          sum += Number(result) || 0;
+          validCount++;
+          displayResult = '<b style="color:#722ed1;">¥ ' + escapeHtml(String(result)) + '</b>';
+        }
+        html += '<tr><td style="padding:6px 10px;border:1px solid #e8e8e8;">' + orderLabel + '</td>' +
+          '<td style="padding:6px 10px;border:1px solid #e8e8e8;">' + gvDisplay + '</td>' +
+          '<td style="padding:6px 10px;border:1px solid #e8e8e8;text-align:right;">' + displayResult + '</td></tr>';
+      });
+      html += '</table>';
+      const validResults = results.filter(r => r !== '' && r !== null && r !== undefined).map(r => Number(r));
+      const avg = validCount > 0 ? (Math.round(sum / validCount * 100) / 100) : 0;
+      const maxVal = validResults.length > 0 ? Math.max(...validResults) : 0;
+      const minVal = validResults.length > 0 ? Math.min(...validResults) : 0;
+      html += '<div style="margin-top:12px;padding:12px;background:#f6ffed;border:1px solid #b7eb8f;border-radius:6px;font-size:14px;">' +
+        '<div style="margin-bottom:4px;">📊 <b>汇总</b>（共 ' + validCount + ' 个有效结果）</div>' +
+        '<div style="display:flex;gap:24px;flex-wrap:wrap;">' +
+        '<span>求和：<b style="color:#52c41a;">¥ ' + (Math.round(sum * 100) / 100) + '</b></span>' +
+        '<span>平均：<b style="color:#1677ff;">¥ ' + avg + '</b></span>' +
+        '<span>最大：<b style="color:#fa8c16;">¥ ' + maxVal + '</b></span>' +
+        '<span>最小：<b style="color:#fa541c;">¥ ' + minVal + '</b></span>' +
+        '</div></div>';
+      document.getElementById('batchCalcResults').innerHTML = html;
+    }
+
     function execBatchCalc() {
+      if (batchCalcMode === 'group') { execBatchCalcGroup(); return; }
       const formulaStr = document.getElementById('batchCalcFormula').value.trim();
       if (!formulaStr) return;
       const selectedList = getSelectedOrders();
@@ -2878,9 +3083,11 @@
             '</label>';
           // 公式字段：显示公式表达式输入
           if (f.type === 'formula') {
+            const groupOn = !!(f.groupEnabled && f.groupField);
             html += '<div class="formula-expr" style="margin-left:8px;display:flex;align-items:center;gap:6px;">' +
               '<input class="f-editable" placeholder="如 价格*2 或 price*2" value="' + escapeAttr(f.formula || '') + '" oninput="updateFieldFormula('+i+', this.value)" style="flex:1;">' +
               '<button class="btn btn-secondary btn-sm" onclick="openFormulaHelp()" title="公式帮助">?</button>' +
+              '<button class="btn btn-secondary btn-sm" style="' + (groupOn ? 'background:#e6fffb;border-color:#87e8de;color:#006d75;' : '') + '" onclick="openGroupFormulaModal('+i+')" title="按字段分组，用不同公式计算">' + (groupOn ? '✓ 分组' : '分组') + '</button>' +
               '</div>';
           }
           // 选项（select）
@@ -2926,6 +3133,117 @@
     function updateFieldLabel(i, v) { fieldsConfig[i].label = v; }
     function updateFieldFormula(i, v) { fieldsConfig[i].formula = v; }
     function updateFieldAutoGen(i, v) { fieldsConfig[i].autoGen = v || ''; }
+
+    // ============ 分组公式配置（公式字段按某字段值用不同公式） ============
+    let groupFormulaEditIndex = -1;
+    let tempGroupRules = []; // [{value, formula}]
+    function openGroupFormulaModal(i) {
+      const f = fieldsConfig[i];
+      if (!f) return;
+      groupFormulaEditIndex = i;
+      document.getElementById('groupFormulaTitle').innerText = '分组公式配置：' + f.label;
+      document.getElementById('groupFormulaDefaultHint').innerText = f.formula || '—';
+      document.getElementById('groupFormulaEnabled').checked = !!(f.groupEnabled && f.groupField);
+      const sel = document.getElementById('groupFormulaField');
+      const opts = fieldsConfig.filter(x => x.type !== 'formula');
+      sel.innerHTML = '<option value="">-- 选择分组字段 --</option>' + opts.map(x =>
+        '<option value="' + escapeAttr(x.key) + '">' + escapeHtml(x.label) + '（' + escapeHtml(x.key) + '）</option>'
+      ).join('');
+      sel.value = f.groupField || '';
+      tempGroupRules = [];
+      if (f.groupRules) {
+        Object.keys(f.groupRules).forEach(k => tempGroupRules.push({ value: k, formula: f.groupRules[k] }));
+      }
+      renderGroupFormulaModal();
+      document.getElementById('groupFormulaModal').classList.add('show');
+    }
+    function closeGroupFormulaModal() {
+      document.getElementById('groupFormulaModal').classList.remove('show');
+      groupFormulaEditIndex = -1;
+      tempGroupRules = [];
+    }
+    function renderGroupFormulaModal() {
+      const enabled = document.getElementById('groupFormulaEnabled').checked;
+      document.getElementById('groupFormulaArea').style.display = enabled ? '' : 'none';
+      if (enabled) renderGroupFormulaRules();
+    }
+    function tempGroupFormulaOf(value) {
+      const r = tempGroupRules.find(x => x.value === value);
+      return r ? (r.formula || '') : '';
+    }
+    function setTempGroupFormula(value, formula) {
+      const r = tempGroupRules.find(x => x.value === value);
+      if (r) r.formula = formula;
+      else tempGroupRules.push({ value: value, formula: formula });
+    }
+    function renderGroupFormulaRules() {
+      const f = fieldsConfig[groupFormulaEditIndex];
+      if (!f) return;
+      const fieldKey = document.getElementById('groupFormulaField').value;
+      const fieldDef = fieldsConfig.find(x => x.key === fieldKey);
+      const container = document.getElementById('groupFormulaRules');
+      const addBtn = document.getElementById('groupFormulaAddRowBtn');
+      if (!fieldDef) {
+        container.innerHTML = '<div style="color:#bbb;font-size:12px;">请先选择分组字段</div>';
+        addBtn.style.display = 'none';
+        return;
+      }
+      if (fieldDef.type === 'select' && fieldDef.options && fieldDef.options.length) {
+        addBtn.style.display = 'none';
+        let html = '<div style="margin-bottom:6px;font-size:12px;color:#888;">为「' + escapeHtml(fieldDef.label) + '」的每个选项填一个公式：</div>';
+        fieldDef.options.forEach(o => {
+          html += '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">' +
+            '<span style="flex:0 0 90px;font-size:13px;color:#333;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeAttr(o.label) + '">' + escapeHtml(o.label) + '</span>' +
+            '<input class="form-input" style="flex:1;" placeholder="如 价格*0.9-成本" value="' + escapeAttr(tempGroupFormulaOf(o.value)) + '" oninput="setTempGroupFormula(\'' + escapeAttr(o.value) + '\', this.value)">' +
+            '</div>';
+        });
+        container.innerHTML = html;
+      } else {
+        addBtn.style.display = 'inline-block';
+        if (tempGroupRules.length === 0) {
+          container.innerHTML = '<div style="color:#bbb;font-size:12px;margin-bottom:6px;">该字段不是下拉选项，点击下方"添加一个条件"，按字段值添加公式</div>';
+          return;
+        }
+        let html = '';
+        tempGroupRules.forEach((r, idx) => {
+          html += '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">' +
+            '<input class="form-input" style="flex:0 0 110px;" placeholder="字段值" value="' + escapeAttr(r.value) + '" oninput="tempGroupRules['+idx+'].value=this.value">' +
+            '<input class="form-input" style="flex:1;" placeholder="该值的公式" value="' + escapeAttr(r.formula) + '" oninput="tempGroupRules['+idx+'].formula=this.value">' +
+            '<button class="btn btn-danger btn-sm" onclick="tempGroupRules.splice('+idx+',1);renderGroupFormulaRules()">×</button>' +
+            '</div>';
+        });
+        container.innerHTML = html;
+      }
+    }
+    function addGroupFormulaRow() {
+      tempGroupRules.push({ value: '', formula: '' });
+      renderGroupFormulaRules();
+    }
+    function saveGroupFormulaConfig() {
+      const f = fieldsConfig[groupFormulaEditIndex];
+      if (!f) return;
+      const enabled = document.getElementById('groupFormulaEnabled').checked;
+      if (!enabled) {
+        f.groupEnabled = false;
+        delete f.groupField;
+        delete f.groupRules;
+      } else {
+        const fieldKey = document.getElementById('groupFormulaField').value;
+        if (!fieldKey) { alert('请选择分组字段'); return; }
+        const rules = {};
+        tempGroupRules.forEach(r => {
+          if (r.value !== '' && String(r.formula).trim() !== '') rules[r.value] = String(r.formula).trim();
+        });
+        f.groupEnabled = true;
+        f.groupField = fieldKey;
+        f.groupRules = rules;
+      }
+      renderFieldsSettings();
+      closeGroupFormulaModal();
+      saveData('修改公式分组配置');
+      render();
+    }
+
     function openFormulaHelp() {
       const container = document.getElementById('formulaHelpFields');
       if (!container) return;
@@ -3368,7 +3686,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.08.07-16'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.08.07-17'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
