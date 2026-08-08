@@ -232,7 +232,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.09-4</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.09-5</button>
     <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
     <button class="btn btn-secondary" onclick="openStatsConfig()">📊 统计配置</button>
@@ -244,6 +244,9 @@
 
 <div class="toolbar">
   <input id="searchInput" placeholder="🔍 搜索订单号 / 内容 / 客户 / 地址..." oninput="render()">
+  <select id="searchFieldSel" onchange="render()" title="限定只在某个字段内搜索">
+    <option value="">全部字段</option>
+  </select>
   <select id="statusFilter" onchange="render()">
     <option value="">全部状态</option>
   </select>
@@ -1590,6 +1593,7 @@
     function render() {
       renderStats();
       renderStatusFilter();
+      updateSearchFieldSel();
       renderTableHead();
       renderTbody();
       renderCards();
@@ -1601,16 +1605,36 @@
     function getFilteredOrders() {
       const kw = document.getElementById('searchInput').value.trim().toLowerCase();
       const sf = document.getElementById('statusFilter').value;
+      const sfd = document.getElementById('searchFieldSel').value;
+      const sField = sfd ? fieldsConfig.find(f => f.key === sfd) : null;
       return orders.filter(o => {
         if (sf) {
           if (o.status !== sf) return false;
         }
         if (kw) {
-          const haystack = fieldsConfig.map(f => getDisplayText(f, o[f.key])).join(' ').toLowerCase();
+          let haystack;
+          if (sField) {
+            // 限定字段：只在该字段内搜索
+            haystack = getDisplayText(sField, o[sField.key]).toLowerCase();
+          } else {
+            haystack = fieldsConfig.map(f => getDisplayText(f, o[f.key])).join(' ').toLowerCase();
+          }
           if (!haystack.includes(kw)) return false;
         }
         return true;
       }).sort((a,b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    }
+
+    function updateSearchFieldSel() {
+      const sel = document.getElementById('searchFieldSel');
+      if (!sel) return;
+      const current = sel.value;
+      let opts = '<option value="">全部字段</option>';
+      fieldsConfig.forEach(f => {
+        opts += '<option value="' + escapeAttr(f.key) + '">' + escapeHtml(f.label) + '</option>';
+      });
+      sel.innerHTML = opts;
+      sel.value = current;
     }
 
     function renderStatusFilter() {
@@ -3859,7 +3883,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.08.09-4'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.08.09-5'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
