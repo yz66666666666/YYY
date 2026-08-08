@@ -232,8 +232,9 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.09-5</button>
-    <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.09-6</button>
+     <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
+     <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
     <button class="btn btn-secondary" onclick="openStatsConfig()">📊 统计配置</button>
     <button class="btn btn-secondary" onclick="document.getElementById('syncModal').classList.add('show')">☁️ 同步</button>
@@ -430,6 +431,39 @@
     <div class="modal-ftr">
       <button class="btn btn-secondary" onclick="closeGroupFormulaModal()">取消</button>
       <button class="btn btn-primary" onclick="saveGroupFormulaConfig()">保存配置</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 商品库弹窗 ============ -->
+<div class="modal-mask" id="productModal">
+  <div class="modal modal-md">
+    <div class="modal-hdr">
+      <h3>📦 商品库</h3>
+      <button class="close-x" onclick="closeModal('productModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div style="margin-bottom:10px;color:#555;font-size:13px;">维护商品信息。新建订单时选择商品，可一键把商品属性（售价、名称等）填入订单。</div>
+      <ul class="opts-list" id="productList"></ul>
+      <button class="btn btn-secondary btn-sm" onclick="openProductEdit(-1)">+ 新增商品</button>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-secondary" onclick="closeModal('productModal')">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 商品编辑弹窗 ============ -->
+<div class="modal-mask" id="productEditModal">
+  <div class="modal modal-md">
+    <div class="modal-hdr">
+      <h3 id="productEditTitle">新增商品</h3>
+      <button class="close-x" onclick="closeProductEdit()">×</button>
+    </div>
+    <div class="modal-body" id="productEditBody"></div>
+    <div class="modal-ftr">
+      <button class="btn btn-secondary" onclick="closeProductEdit()">取消</button>
+      <button class="btn btn-primary" onclick="saveProductEdit()">保存商品</button>
     </div>
   </div>
 </div>
@@ -702,6 +736,7 @@
     let fieldsConfig = JSON.parse(JSON.stringify(DEFAULT_FIELDS));
     let fieldDefaults = {}; // key -> [value1, value2, ...] 手动默认选项（蓝色，管理弹窗维护，无上限）
     let fieldHistory = {}; // key -> [最近3次填写的值] 自动历史记录（黄色）
+    let products = []; // 商品库：{id, name, fields: { 字段key: 值 }}，新建订单时选商品一键填充
     let orders = [];
     let editingId = null;
     let syncToken = '';
@@ -856,6 +891,7 @@
         fieldsConfig: JSON.parse(JSON.stringify(fieldsConfig)),
         fieldDefaults: JSON.parse(JSON.stringify(fieldDefaults)),
         fieldHistory: JSON.parse(JSON.stringify(fieldHistory)),
+        products: JSON.parse(JSON.stringify(products)),
         orders: JSON.parse(JSON.stringify(orders)),
         statsConfig: JSON.parse(JSON.stringify(statsConfig)),
         savedAt: new Date().toISOString()
@@ -1464,6 +1500,7 @@
             fieldHistory = data.fieldHistory;
           }
           orders = Array.isArray(data.orders) ? data.orders : [];
+          products = Array.isArray(data.products) ? data.products : [];
           syncToken = data.syncToken || '';
           syncGistId = data.syncGistId || '';
           if (data.statsConfig && Array.isArray(data.statsConfig)) {
@@ -1509,6 +1546,7 @@
         fieldsConfig: fieldsConfig,
         fieldDefaults: fieldDefaults,
         fieldHistory: fieldHistory,
+        products: products,
         orders: orders,
         syncToken: syncToken,
         syncGistId: syncGistId,
@@ -1536,6 +1574,7 @@
       if (snap.fieldsConfig) fieldsConfig = snap.fieldsConfig;
       if (snap.fieldDefaults) fieldDefaults = snap.fieldDefaults;
       if (snap.fieldHistory) fieldHistory = snap.fieldHistory;
+      if (snap.products) products = snap.products;
       if (snap.orders) orders = snap.orders;
       if (snap.statsConfig) statsConfig = snap.statsConfig;
     }
@@ -1552,7 +1591,7 @@
         // 同时把 lastHistorySnapshot 也更新为应用后的状态
         lastHistorySnapshot = getCurrentSnapshot();
         const payload = {
-          fieldsConfig: fieldsConfig, fieldDefaults: fieldDefaults, fieldHistory: fieldHistory, orders: orders,
+          fieldsConfig: fieldsConfig, fieldDefaults: fieldDefaults, fieldHistory: fieldHistory, products: products, orders: orders,
           syncToken: syncToken, syncGistId: syncGistId, statsConfig: statsConfig,
           savedAt: new Date().toISOString()
         };
@@ -1576,7 +1615,7 @@
         applySnapshot(item.snapshot);
         lastHistorySnapshot = getCurrentSnapshot();
         const payload = {
-          fieldsConfig: fieldsConfig, fieldDefaults: fieldDefaults, fieldHistory: fieldHistory, orders: orders,
+          fieldsConfig: fieldsConfig, fieldDefaults: fieldDefaults, fieldHistory: fieldHistory, products: products, orders: orders,
           syncToken: syncToken, syncGistId: syncGistId, statsConfig: statsConfig,
           savedAt: new Date().toISOString()
         };
@@ -1987,11 +2026,142 @@
     }
 
     // ============ 新增 / 编辑订单表单 ============
+    // ============ 商品库 ============
+    let productEditIndex = -1;
+    function getProductFields() {
+      return fieldsConfig.filter(f => !f.system && f.type !== 'formula' && f.type !== 'imageText');
+    }
+    function openProductManager() {
+      renderProductList();
+      document.getElementById('productModal').classList.add('show');
+    }
+    function renderProductList() {
+      const el = document.getElementById('productList');
+      if (!el) return;
+      if (products.length === 0) {
+        el.innerHTML = '<li class="empty-hint">暂无商品，点击下方"+ 新增商品"添加</li>';
+        return;
+      }
+      let html = '';
+      products.forEach((p, i) => {
+        const n = p.fields ? Object.keys(p.fields).length : 0;
+        html += '<li style="display:flex;align-items:center;gap:8px;">' +
+          '<span style="flex:1;font-weight:500;color:#333;">' + escapeHtml(p.name) + '</span>' +
+          '<span style="font-size:12px;color:#888;">' + n + ' 个属性</span>' +
+          '<button class="btn btn-secondary btn-sm" onclick="openProductEdit(' + i + ')">编辑</button>' +
+          '<button class="btn btn-danger btn-sm" onclick="deleteProduct(' + i + ')">删除</button>' +
+          '</li>';
+      });
+      el.innerHTML = html;
+    }
+    function openProductEdit(index) {
+      productEditIndex = index;
+      const p = index >= 0 ? products[index] : null;
+      document.getElementById('productEditTitle').innerText = p ? '编辑商品：' + p.name : '新增商品';
+      const body = document.getElementById('productEditBody');
+      let html = '<div class="form-row"><label class="req">商品名称</label><div class="ctl"><input class="form-input" id="productNameInput" placeholder="如：红色卫衣 L码" value="' + escapeAttr(p ? p.name : '') + '"></div></div>';
+      const fields = getProductFields();
+      if (fields.length > 0) {
+        html += '<div style="margin:10px 0 4px;font-size:12px;color:#888;">商品属性（新建订单选该商品时自动填入）：</div>';
+        fields.forEach(f => {
+          const val = p && p.fields ? (p.fields[f.key] !== undefined ? p.fields[f.key] : '') : '';
+          html += '<div class="form-row"><label>' + escapeHtml(f.label) + '</label><div class="ctl">' + renderProductField(f, val) + '</div></div>';
+        });
+      }
+      body.innerHTML = html;
+      document.getElementById('productEditModal').classList.add('show');
+    }
+    function renderProductField(field, val) {
+      if (field.type === 'textarea') return '<textarea class="form-textarea" data-field="' + escapeAttr(field.key) + '">' + escapeHtml(val || '') + '</textarea>';
+      if (field.type === 'select') {
+        if (!field.options || field.options.length === 0) return '<input class="form-input" data-field="' + escapeAttr(field.key) + '" value="' + escapeAttr(val == null ? '' : val) + '">';
+        let opts = '<option value="">-- 请选择 --</option>';
+        field.options.forEach(o => {
+          const sel = (String(val) === String(o.value)) ? ' selected' : '';
+          opts += '<option value="' + escapeAttr(o.value) + '"' + sel + '>' + escapeHtml(o.label) + '</option>';
+        });
+        return '<select class="form-select" data-field="' + escapeAttr(field.key) + '">' + opts + '</select>';
+      }
+      if (field.type === 'datetime') {
+        let dstr = '';
+        if (val) {
+          const d = new Date(val);
+          if (!isNaN(d)) {
+            const pad = n => n < 10 ? '0' + n : '' + n;
+            dstr = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+          }
+        }
+        return '<input type="datetime-local" class="form-input" data-field="' + escapeAttr(field.key) + '" value="' + escapeAttr(dstr) + '">';
+      }
+      return '<input class="form-input" data-field="' + escapeAttr(field.key) + '" value="' + escapeAttr(val == null ? '' : val) + '">';
+    }
+    function closeProductEdit() {
+      document.getElementById('productEditModal').classList.remove('show');
+      productEditIndex = -1;
+    }
+    function saveProductEdit() {
+      const name = document.getElementById('productNameInput').value.trim();
+      if (!name) { showToast('请填写商品名称'); return; }
+      const body = document.getElementById('productEditBody');
+      const fields = {};
+      getProductFields().forEach(f => {
+        const el = body.querySelector('[data-field="' + f.key + '"]');
+        if (!el) return;
+        let v = el.value;
+        if (f.type === 'number') v = (v === '') ? '' : (Number(v) || 0);
+        if (f.type === 'datetime' && v) v = new Date(v).toISOString();
+        if (v !== '' && v !== null && v !== undefined) fields[f.key] = v;
+      });
+      if (productEditIndex === -1) {
+        products.push({ id: 'p_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: name, fields: fields });
+      } else {
+        products[productEditIndex].name = name;
+        products[productEditIndex].fields = fields;
+      }
+      closeProductEdit();
+      renderProductList();
+      saveData('保存商品');
+      showToast('✅ 商品已保存');
+    }
+    function deleteProduct(i) {
+      if (!confirm('删除商品「' + products[i].name + '」？')) return;
+      products.splice(i, 1);
+      renderProductList();
+      saveData('删除商品');
+      showToast('已删除商品');
+    }
+    // 新建订单：顶部"选择商品"一键填充
+    function buildProductPickerHtml() {
+      if (products.length === 0) return '';
+      let opts = '<option value="">-- 选择商品自动填写 --</option>';
+      products.forEach(p => {
+        opts += '<option value="' + escapeAttr(p.id) + '">' + escapeHtml(p.name) + '</option>';
+      });
+      return '<div style="background:#f0f9ff;border:1px solid #bae0ff;border-radius:6px;padding:8px 12px;margin-bottom:12px;">' +
+        '<div style="font-size:13px;font-weight:600;color:#1677ff;margin-bottom:4px;">📦 选择商品</div>' +
+        '<select class="form-select" id="orderProductSel" onchange="applyProductToForm(this.value)">' + opts + '</select>' +
+        '<div style="font-size:12px;color:#888;margin-top:4px;">选择后自动填入商品属性，仍可手动修改</div>' +
+        '</div>';
+    }
+    function applyProductToForm(pid) {
+      if (!pid) return;
+      const p = products.find(x => x.id === pid);
+      if (!p || !p.fields) return;
+      const body = document.getElementById('orderFormBody');
+      Object.keys(p.fields).forEach(key => {
+        const el = body.querySelector('[data-field="' + key + '"]');
+        if (!el) return;
+        const val = p.fields[key];
+        if (val === undefined || val === null || val === '') return;
+        el.value = val;
+      });
+    }
+
     function openAddModal() {
       editingId = null;
       document.getElementById('orderModalTitle').innerText = '新增订单';
       const form = document.getElementById('orderFormBody');
-      form.innerHTML = buildFormHtml('add_', {});
+      form.innerHTML = buildProductPickerHtml() + buildFormHtml('add_', {});
       document.getElementById('orderModal').classList.add('show');
     }
 
@@ -3654,6 +3824,7 @@
         fieldsConfig: fieldsConfig,
         fieldDefaults: fieldDefaults,
         fieldHistory: fieldHistory,
+        products: products,
         orders: orders,
         syncToken: token,
         statsConfig: statsConfig,
@@ -3731,6 +3902,7 @@
         if (parsed.fieldDefaults) fieldDefaults = parsed.fieldDefaults;
         if (parsed.fieldHistory) fieldHistory = parsed.fieldHistory;
         if (Array.isArray(parsed.orders)) orders = parsed.orders;
+        if (Array.isArray(parsed.products)) products = parsed.products;
         if (parsed.statsConfig && Array.isArray(parsed.statsConfig)) statsConfig = parsed.statsConfig;
         syncToken = token;
         syncGistId = gistId;
@@ -3780,6 +3952,7 @@
           if (data.fieldDefaults) fieldDefaults = data.fieldDefaults;
           if (data.fieldHistory) fieldHistory = data.fieldHistory;
           if (Array.isArray(data.orders)) orders = data.orders;
+          if (Array.isArray(data.products)) products = data.products;
           if (data.statsConfig && Array.isArray(data.statsConfig)) statsConfig = data.statsConfig;
           saveData('导入本地数据');
           render();
@@ -3883,7 +4056,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.08.09-5'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.08.09-6'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
