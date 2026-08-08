@@ -232,7 +232,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.09-6</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.09-7</button>
      <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
      <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
@@ -2802,11 +2802,12 @@
       const selectedList = getSelectedOrders();
       if (selectedList.length === 0) return;
       let html = '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
-      html += '<tr style="background:#f5f5f5;"><th style="padding:6px 10px;text-align:left;border:1px solid #e8e8e8;">订单</th><th style="padding:6px 10px;text-align:left;border:1px solid #e8e8e8;">' + escapeHtml(fieldDef.label) + '</th><th style="padding:6px 10px;text-align:right;border:1px solid #e8e8e8;">计算结果</th></tr>';
+      html += '<tr style="background:#f5f5f5;"><th style="padding:6px 10px;text-align:left;border:1px solid #e8e8e8;">订单</th><th style="padding:6px 10px;text-align:left;border:1px solid #e8e8e8;">' + escapeHtml(fieldDef.label) + '</th><th style="padding:6px 10px;text-align:right;border:1px solid #e8e8e8;">计算结果</th><th style="padding:6px 10px;border:1px solid #e8e8e8;width:44px;"></th></tr>';
       let sum = 0;
       let validCount = 0;
       const results = [];
-      selectedList.forEach(o => {
+      batchCalcDetailData = [];
+      selectedList.forEach((o, idx) => {
         const gv = String(o[fieldKey] === null || o[fieldKey] === undefined ? '' : o[fieldKey]);
         let formula = rules[gv];
         if (!formula || !String(formula).trim()) formula = defaultFormula;
@@ -2815,6 +2816,11 @@
           result = evalFormula({ type: 'formula', formula: String(formula) }, o);
         }
         results.push(result);
+        batchCalcDetailData.push({
+          order: o,
+          formula: String(formula || ''),
+          note: '按「' + escapeHtml(fieldDef.label) + '」= ' + (gv === '' ? '（空）' : escapeHtml(getDisplayText(fieldDef, o[fieldKey]))) + '，使用该分组公式'
+        });
         const orderLabel = escapeHtml(getDisplayText(fieldsConfig[0] || {label:'订单'}, o[fieldsConfig[0] ? fieldsConfig[0].key : 'orderNo']) || o.id);
         const gvDisplay = escapeHtml(getDisplayText(fieldDef, o[fieldKey]) || '—');
         let displayResult;
@@ -2827,7 +2833,8 @@
         }
         html += '<tr><td style="padding:6px 10px;border:1px solid #e8e8e8;">' + orderLabel + '</td>' +
           '<td style="padding:6px 10px;border:1px solid #e8e8e8;">' + gvDisplay + '</td>' +
-          '<td style="padding:6px 10px;border:1px solid #e8e8e8;text-align:right;">' + displayResult + '</td></tr>';
+          '<td style="padding:6px 10px;border:1px solid #e8e8e8;text-align:right;">' + displayResult + '</td>' +
+          '<td style="padding:6px 10px;border:1px solid #e8e8e8;text-align:center;"><button class="btn btn-secondary btn-sm" onclick="showBatchCalcDetail(' + idx + ')" title="查看计算过程">📖</button></td></tr>';
       });
       html += '</table>';
       const validResults = results.filter(r => r !== '' && r !== null && r !== undefined).map(r => Number(r));
@@ -2855,14 +2862,16 @@
       renderCalcHistory();
       // 构造一个临时 formula 字段来复用 evalFormula
       const tempField = { type: 'formula', formula: formulaStr };
+      batchCalcDetailData = [];
       let html = '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
-      html += '<tr style="background:#f5f5f5;"><th style="padding:6px 10px;text-align:left;border:1px solid #e8e8e8;">订单</th><th style="padding:6px 10px;text-align:right;border:1px solid #e8e8e8;">计算结果</th></tr>';
+      html += '<tr style="background:#f5f5f5;"><th style="padding:6px 10px;text-align:left;border:1px solid #e8e8e8;">订单</th><th style="padding:6px 10px;text-align:right;border:1px solid #e8e8e8;">计算结果</th><th style="padding:6px 10px;border:1px solid #e8e8e8;width:44px;"></th></tr>';
       let sum = 0;
       let validCount = 0;
       const results = [];
-      selectedList.forEach(o => {
+      selectedList.forEach((o, idx) => {
         const result = evalFormula(tempField, o);
         results.push(result);
+        batchCalcDetailData.push({ order: o, formula: formulaStr, note: '' });
         const orderLabel = escapeHtml(getDisplayText(fieldsConfig[0] || {label:'订单'}, o[fieldsConfig[0] ? fieldsConfig[0].key : 'orderNo']) || o.id);
         let displayResult;
         if (result === '' || result === null || result === undefined) {
@@ -2873,7 +2882,8 @@
           displayResult = '<b style="color:#722ed1;">¥ ' + escapeHtml(String(result)) + '</b>';
         }
         html += '<tr><td style="padding:6px 10px;border:1px solid #e8e8e8;">' + orderLabel + '</td>' +
-          '<td style="padding:6px 10px;border:1px solid #e8e8e8;text-align:right;">' + displayResult + '</td></tr>';
+          '<td style="padding:6px 10px;border:1px solid #e8e8e8;text-align:right;">' + displayResult + '</td>' +
+          '<td style="padding:6px 10px;border:1px solid #e8e8e8;text-align:center;"><button class="btn btn-secondary btn-sm" onclick="showBatchCalcDetail(' + idx + ')" title="查看计算过程">📖</button></td></tr>';
       });
       html += '</table>';
       const validResults = results.filter(r => r !== '' && r !== null && r !== undefined).map(r => Number(r));
@@ -3495,18 +3505,29 @@
       const order = orders.find(o => o.id === orderId);
       if (!field || !order || field.type !== 'formula') return;
       const d = explainFormula(field, order);
-      document.getElementById('formulaDetailTitle').innerText = field.label + ' 计算过程';
+      renderFormulaDetailModal(field.label + ' 计算过程', d.note, d.steps, d.result);
+    }
+    // 批量计算详情：临时公式（普通/分组模式）展示某个订单的计算过程
+    let batchCalcDetailData = []; // [{order, formula, note}]
+    function showBatchCalcDetail(i) {
+      const item = batchCalcDetailData[i];
+      if (!item) return;
+      const d = explainFormula({ type: 'formula', formula: item.formula }, item.order);
+      renderFormulaDetailModal('计算过程', item.note || d.note, d.steps, d.result);
+    }
+    function renderFormulaDetailModal(title, note, steps, result) {
+      document.getElementById('formulaDetailTitle').innerText = title;
       let html = '';
-      if (d.note) html += '<div style="margin-bottom:10px;padding:8px 10px;background:#e6fffb;border:1px solid #87e8de;border-radius:6px;font-size:13px;color:#006d75;">' + d.note + '</div>';
-      d.steps.forEach((s, idx) => {
-        const isLast = idx === d.steps.length - 1;
+      if (note) html += '<div style="margin-bottom:10px;padding:8px 10px;background:#e6fffb;border:1px solid #87e8de;border-radius:6px;font-size:13px;color:#006d75;">' + note + '</div>';
+      steps.forEach((s, idx) => {
+        const isLast = idx === steps.length - 1;
         html += '<div style="padding:8px 12px;margin-bottom:6px;background:' + (isLast ? '#f6ffed' : '#fafafa') + ';border:1px solid ' + (isLast ? '#b7eb8f' : '#eee') + ';border-radius:6px;font-family:monospace;font-size:14px;color:#333;">' +
           '<div style="font-size:11px;color:#999;margin-bottom:2px;">' + escapeHtml(s.label) + '</div>' +
           '<div>' + escapeHtml(s.expr) +
-          (isLast ? ' <span style="color:#52c41a;font-weight:bold;">= ' + escapeHtml(String(d.result)) + '</span>' : '') +
+          (isLast ? ' <span style="color:#52c41a;font-weight:bold;">= ' + escapeHtml(String(result)) + '</span>' : '') +
           '</div></div>';
       });
-      if (d.result === '' || d.result === null || d.result === undefined) {
+      if (result === '' || result === null || result === undefined) {
         html += '<div style="padding:10px;color:#fa541c;font-size:13px;">⚠ 无法计算出结果。请检查：公式里的字段名是否正确、数值是否填写、符号是否为英文半角。</div>';
       }
       document.getElementById('formulaDetailSteps').innerHTML = html;
@@ -4056,7 +4077,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.08.09-6'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.08.09-7'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
