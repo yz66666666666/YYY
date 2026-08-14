@@ -91,6 +91,10 @@
   .mode-config-group { margin-bottom: 14px; }
   .mode-config-title { font-weight: 600; color: #333; font-size: 14px; margin-bottom: 6px; padding: 6px 10px; background: #f5f7fa; border-radius: 4px; }
   .mode-config-list { border: 1px solid #eee; border-radius: 6px; padding: 4px 10px; max-height: 220px; overflow-y: auto; }
+  /* 手动排序拖拽状态 */
+  .dragging-order { opacity: 0.5; background: #e6f7ff !important; }
+  body.dragging-active { user-select: none; -webkit-user-select: none; cursor: move; }
+  body.dragging-active * { cursor: move !important; }
   @media (max-width: 768px) {
     header h1 { font-size: 16px; }
     .btn { padding: 6px 10px; font-size: 13px; }
@@ -232,7 +236,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.09-8</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.14-1</button>
      <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
      <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
@@ -245,11 +249,16 @@
 
 <div class="toolbar">
   <input id="searchInput" placeholder="🔍 搜索订单号 / 内容 / 客户 / 地址..." oninput="render()">
+  <select id="statusFilter" onchange="render()">
+    <option value="">全部状态</option>
+  </select>
   <select id="searchFieldSel" onchange="render()" title="限定只在某个字段内搜索">
     <option value="">全部字段</option>
   </select>
-  <select id="statusFilter" onchange="render()">
-    <option value="">全部状态</option>
+  <select id="sortSel" onchange="onSortModeChange()" title="排序方式">
+    <option value="time">⏱ 时间倒序</option>
+    <option value="timeAsc">⏱ 时间正序</option>
+    <option value="manual">✋ 手动排序</option>
   </select>
   <div class="view-switch" id="viewSwitch">
     <button class="view-switch-btn" data-mview="compact" onclick="setMobileView('compact')">一 紧凑</button>
@@ -738,6 +747,8 @@
     let fieldHistory = {}; // key -> [最近3次填写的值] 自动历史记录（黄色）
     let products = []; // 商品库：{id, name, fields: { 字段key: 值 }}，新建订单时选商品一键填充
     let orders = [];
+    let manualOrder = []; // 手动排序的订单 id 顺序（未列入的订单排最后）
+    let orderSortMode = 'time'; // 'time' 时间倒序 | 'manual' 手动排序
     let editingId = null;
     let syncToken = '';
     let syncGistId = '';
@@ -1638,15 +1649,17 @@
       renderCards();
       renderCompactList();
       renderCompactHead();
+      initManualOrderDrag();
       updateBatchBar();
     }
 
     function getFilteredOrders() {
+      if (orderSortMode === 'manual') ensureManualOrderComplete();
       const kw = document.getElementById('searchInput').value.trim().toLowerCase();
       const sf = document.getElementById('statusFilter').value;
       const sfd = document.getElementById('searchFieldSel').value;
       const sField = sfd ? fieldsConfig.find(f => f.key === sfd) : null;
-      return orders.filter(o => {
+      const filtered = orders.filter(o => {
         if (sf) {
           if (o.status !== sf) return false;
         }
@@ -1661,7 +1674,201 @@
           if (!haystack.includes(kw)) return false;
         }
         return true;
-      }).sort((a,b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      });
+      if (orderSortMode === 'manual') {
+        // 手动排序：按 manualOrder 顺序，未列入的订单排最后（再按时间倒序）
+        filtered.sort((a, b) => {
+          const ia = manualOrder.indexOf(a.id);
+          const ib = manualOrder.indexOf(b.id);
+          if (ia === -1 && ib === -1) return (b.createdAt || '').localeCompare(a.createdAt || '');
+          if (ia === -1) return 1;
+          if (ib === -1) return -1;
+          return ia - ib;
+        });
+      } else if (orderSortMode === 'timeAsc') {
+        filtered.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+      } else {
+        filtered.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      }
+      return filtered;
+    }
+
+    function onSortModeChange() {
+      const sel = document.getElementById('sortSel');
+      orderSortMode = (sel.value === 'manual' || sel.value === 'timeAsc') ? sel.value : 'time';
+      if (orderSortMode === 'manual') {
+        ensureManualOrderComplete();
+        if (manualOrder.length === 0) {
+          // 首次切到手动排序：用当前时间倒序初始化，让用户在此基础上拖拽
+          manualOrder = orders.slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).map(o => o.id);
+        }
+      }
+      saveSortState();
+      render();
+    }
+    // 保证 manualOrder 包含所有现有订单（新订单按时间倒序追加到末尾），并清除已删除订单
+    function ensureManualOrderComplete() {
+      const idSet = {};
+      orders.forEach(o => idSet[o.id] = true);
+      const missing = orders.filter(o => manualOrder.indexOf(o.id) === -1)
+        .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+        .map(o => o.id);
+      manualOrder = manualOrder.filter(id => idSet[id]).concat(missing);
+    }
+    function saveSortState() {
+      try {
+        localStorage.setItem('orderManualOrder', JSON.stringify(manualOrder));
+        localStorage.setItem('orderSortMode', orderSortMode);
+      } catch (e) {}
+    }
+    function loadSortState() {
+      try {
+        const m = JSON.parse(localStorage.getItem('orderManualOrder') || 'null');
+        if (Array.isArray(m)) manualOrder = m;
+        const s = localStorage.getItem('orderSortMode');
+        if (s === 'manual' || s === 'time' || s === 'timeAsc') orderSortMode = s;
+      } catch (e) {}
+      const sel = document.getElementById('sortSel');
+      if (sel) sel.value = orderSortMode;
+    }
+
+    // ============ 手动排序：长按整行拖拽 ============
+    let orderDragState = null;      // 正在拖拽的 { id, el }
+    let orderDragSuppressClick = false;
+    let orderDragDocBound = false;
+
+    function getOrderListContainer() {
+      if (mobileViewMode === 'compact') return document.getElementById('compactList');
+      if (mobileViewMode === 'card') return document.getElementById('cardList');
+      return document.getElementById('ordersTbody');
+    }
+    function orderRowNodes(container) {
+      return Array.prototype.slice.call(container.querySelectorAll('[data-id]'));
+    }
+    function isDragHandleTarget(e) {
+      return !(e.target.closest && e.target.closest('button, input, select, a, textarea, label.cr-check'));
+    }
+
+    function initManualOrderDrag() {
+      if (orderSortMode !== 'manual') { orderDragState = null; return; }
+      const container = getOrderListContainer();
+      if (!container) return;
+      orderRowNodes(container).forEach(el => bindOrderRowDrag(el, el.getAttribute('data-id')));
+      // 文档级鼠标监听只注册一次
+      if (!orderDragDocBound) {
+        orderDragDocBound = true;
+        document.addEventListener('mousemove', function (e) {
+          if (orderDragState) moveDraggedOrder(e.clientY);
+        });
+        document.addEventListener('mouseup', function () {
+          if (orderDragState) finishOrderDrag();
+        });
+        document.addEventListener('click', function (e) {
+          if (orderDragSuppressClick) {
+            e.preventDefault();
+            e.stopPropagation();
+            orderDragSuppressClick = false;
+          }
+        }, true);
+      }
+    }
+
+    function bindOrderRowDrag(el, id) {
+      let timer = null, startX = 0, startY = 0;
+      const clear = function () { if (timer) { clearTimeout(timer); timer = null; } };
+      const start = function (x, y) {
+        if (orderDragState) return;
+        startX = x; startY = y;
+        clear();
+        timer = setTimeout(function () { timer = null; beginOrderDrag(el, id); }, 450);
+      };
+      const jitterCancel = function (x, y) {
+        if (!orderDragState && (Math.abs(x - startX) > 10 || Math.abs(y - startY) > 10)) clear();
+      };
+
+      // 触摸
+      el.addEventListener('touchstart', function (e) {
+        if (!isDragHandleTarget(e)) return;
+        start(e.touches[0].clientX, e.touches[0].clientY);
+      }, { passive: true });
+      el.addEventListener('touchmove', function (e) {
+        if (orderDragState && orderDragState.id === id) {
+          e.preventDefault(); // 拖拽时阻止页面滚动
+          moveDraggedOrder(e.touches[0].clientY);
+        } else {
+          jitterCancel(e.touches[0].clientX, e.touches[0].clientY);
+        }
+      }, { passive: false });
+      el.addEventListener('touchend', function () {
+        clear();
+        if (orderDragState && orderDragState.id === id) finishOrderDrag();
+      }, { passive: true });
+      el.addEventListener('touchcancel', function () {
+        clear();
+        if (orderDragState && orderDragState.id === id) finishOrderDrag();
+      }, { passive: true });
+
+      // 鼠标
+      el.addEventListener('mousedown', function (e) {
+        if (!isDragHandleTarget(e)) return;
+        if (e.button !== 0) return;
+        start(e.clientX, e.clientY);
+      });
+      el.addEventListener('mousemove', function (e) { jitterCancel(e.clientX, e.clientY); });
+      el.addEventListener('mouseup', function () { clear(); });
+      el.addEventListener('mouseleave', function () { if (!orderDragState) clear(); });
+    }
+
+    function beginOrderDrag(el, id) {
+      orderDragState = { id: id, el: el };
+      el.classList.add('dragging-order');
+      document.body.classList.add('dragging-active');
+      if (navigator.vibrate) { try { navigator.vibrate(20); } catch (e) {} }
+    }
+
+    function moveDraggedOrder(clientY) {
+      const st = orderDragState;
+      if (!st) return;
+      const container = getOrderListContainer();
+      const rows = orderRowNodes(container);
+      let insertBefore = null;
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        if (r === st.el) continue;
+        const rect = r.getBoundingClientRect();
+        if (clientY < rect.top + rect.height / 2) { insertBefore = r; break; }
+      }
+      if (insertBefore) container.insertBefore(st.el, insertBefore);
+      else container.appendChild(st.el);
+    }
+
+    function finishOrderDrag() {
+      const st = orderDragState;
+      if (!st) return;
+      st.el.classList.remove('dragging-order');
+      document.body.classList.remove('dragging-active');
+      orderDragState = null;
+      syncManualOrderFromDom();
+      saveSortState();
+      orderDragSuppressClick = true;
+      setTimeout(function () { orderDragSuppressClick = false; }, 400);
+      render();
+    }
+
+    // 把当前可见列表的 DOM 顺序同步回 manualOrder（保留被筛选掉的订单原有相对顺序）
+    function syncManualOrderFromDom() {
+      const container = getOrderListContainer();
+      const domOrder = orderRowNodes(container).map(el => el.getAttribute('data-id'));
+      const domSet = {};
+      domOrder.forEach(id => { domSet[id] = true; });
+      let anchor = 0;
+      for (let i = 0; i < manualOrder.length; i++) {
+        if (domSet[manualOrder[i]]) { anchor = i; break; }
+      }
+      const base = manualOrder.filter(id => !domSet[id]);
+      const insertAt = Math.max(0, Math.min(anchor, base.length));
+      manualOrder = base.slice(0, insertAt).concat(domOrder, base.slice(insertAt));
+      ensureManualOrderComplete();
     }
 
     function updateSearchFieldSel() {
@@ -4075,6 +4282,7 @@
     loadDailyCounters();
     loadCollapsedDefaults();
     loadViewSettings();
+    loadSortState();
     document.body.setAttribute('data-mview', mobileViewMode);
     updateViewSwitchButtons();
     // 回填同步弹窗
@@ -4092,7 +4300,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.08.09-8'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.08.14-1'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
