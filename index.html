@@ -129,6 +129,14 @@
   .ocr-field-row .ofl-val input, .ocr-field-row .ofl-val select, .ocr-field-row .ofl-val textarea { width: 100%; padding: 6px 8px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 14px; }
   .ocr-field-row.low-conf .ofl-val input, .ocr-field-row.low-conf .ofl-val textarea { background: #fffbe6; border-color: #ffe58f; }
   .ocr-low-badge { font-size: 11px; color: #b86100; background: #fff1b8; padding: 1px 5px; border-radius: 6px; margin-left: 4px; }
+  .ocr-rule-item { padding: 10px 0; border-bottom: 1px solid #f0f0f0; }
+  .ocr-rule-label { font-size: 14px; font-weight: 600; color: #333; margin-bottom: 6px; }
+  .ocr-rule-type { font-size: 11px; color: #999; font-weight: normal; margin-left: 4px; }
+  .ocr-rule-kws { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .ocr-kw { display: inline-flex; align-items: center; gap: 3px; background: #eef4ff; color: #1a73e8; padding: 3px 8px; border-radius: 12px; font-size: 13px; }
+  .ocr-kw-del { border: none; background: none; color: #999; cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; }
+  .ocr-kw-del:hover { color: #e03c3c; }
+  .ocr-kw-input { flex: 1; min-width: 120px; padding: 5px 8px; border: 1px dashed #c9d6ff; border-radius: 4px; font-size: 13px; }
   @media (max-width: 768px) {
     .ocr-review { flex-direction: column; }
     .ocr-field-row .ofl-label { width: 70px; }
@@ -256,7 +264,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.14-3</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.14-4</button>
      <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
      <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
@@ -331,7 +339,10 @@
   <div class="modal modal-lg">
     <div class="modal-hdr">
       <h3>📷 截图识别订单</h3>
-      <button class="close-x" onclick="closeOcrModal()">×</button>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <button class="btn btn-secondary btn-sm" onclick="openOcrRulesModal()">⚙ 规则</button>
+        <button class="close-x" onclick="closeOcrModal()">×</button>
+      </div>
     </div>
     <div class="modal-body">
       <div id="ocrUploadArea">
@@ -345,6 +356,12 @@
           <img id="ocrPreviewImg" style="max-width:100%;max-height:260px;border:1px solid #eee;border-radius:6px;" alt="">
         </div>
         <div id="ocrStatus" style="font-size:13px;color:#888;text-align:center;"></div>
+        <div id="ocrProgressWrap" style="display:none;margin-top:10px;">
+          <div style="height:8px;background:#e8edf5;border-radius:999px;overflow:hidden;">
+            <div id="ocrProgressBar" style="height:100%;width:0%;background:#1a73e8;border-radius:999px;transition:width 0.15s;"></div>
+          </div>
+          <div id="ocrProgressText" style="font-size:12px;color:#888;text-align:center;margin-top:5px;">0%</div>
+        </div>
         <div style="text-align:center;margin-top:12px;">
           <button class="btn btn-primary" id="ocrRunBtn" onclick="runOcr()" style="display:none;">🔍 开始识别</button>
         </div>
@@ -366,6 +383,24 @@
       <button class="btn btn-secondary" onclick="closeOcrModal()">取消</button>
       <button class="btn btn-secondary" id="ocrRePickBtn" onclick="resetOcrModal()" style="display:none;">重新选图</button>
       <button class="btn btn-primary" id="ocrApplyBtn" onclick="applyOcrToForm()" style="display:none;">确认填充到表单</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 识别规则设置弹窗 ============ -->
+<div class="modal-mask" id="ocrRulesModal">
+  <div class="modal modal-md">
+    <div class="modal-hdr">
+      <h3>⚙ 识别规则设置</h3>
+      <button class="close-x" onclick="closeModal('ocrRulesModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:12px;color:#888;margin-bottom:12px;">每个字段配一组「关键词」，识别时找含这些关键词的文字行来取值。点 × 删除，输入后回车添加，改动即时生效。</div>
+      <div id="ocrRulesList"></div>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-secondary" onclick="resetOcrRules()">恢复默认</button>
+      <button class="btn btn-primary" onclick="closeModal('ocrRulesModal')">完成</button>
     </div>
   </div>
 </div>
@@ -845,6 +880,7 @@
       ocrExtracted = null;
       const fi = document.getElementById('ocrFileInput');
       if (fi) fi.value = '';
+      hideOcrProgress();
       document.getElementById('ocrUploadArea').style.display = '';
       document.getElementById('ocrResultArea').style.display = 'none';
       document.getElementById('ocrPreviewWrap').style.display = 'none';
@@ -888,12 +924,16 @@
       const status = document.getElementById('ocrStatus');
       const runBtn = document.getElementById('ocrRunBtn');
       runBtn.disabled = true;
-      status.innerText = '正在加载 OCR 模型（首次约需下载几 MB，请稍候）...';
+      status.innerText = '正在准备 OCR 引擎...';
+      showOcrProgress(0, '准备下载模型...');
       try {
-        const ocr = await loadOcrEngine();
-        status.innerText = '正在识别文字...';
+        const ocr = await loadOcrEngine(function (f) {
+          showOcrProgress(f, '正在下载模型 ' + Math.round(f * 100) + '%');
+        });
+        showOcrProgress(1, '模型就绪，正在识别文字...');
         const raw = await ocr.ocr(ocrCurrentImage.dataUrl);
         const lines = normalizeOcrResult(raw);
+        hideOcrProgress();
         status.innerText = '识别完成，共 ' + lines.length + ' 行文字，正在匹配字段...';
         ocrExtracted = extractFieldsByRules(lines);
         renderOcrReview();
@@ -901,6 +941,7 @@
         document.getElementById('ocrResultArea').style.display = '';
         document.getElementById('ocrApplyBtn').style.display = '';
       } catch (err) {
+        hideOcrProgress();
         status.innerText = '❌ 识别失败：' + (err && err.message ? err.message : err);
         console.error('OCR error', err);
       } finally {
@@ -947,28 +988,71 @@
         });
       }).catch(function () {});
     }
-    // 下载模型二进制（优先走 IndexedDB 缓存）
-    async function loadOcrModelBuffer(url, cacheKey) {
+    // 下载模型/字典文件（优先 IndexedDB 缓存；onChunk(received, total) 报告字节进度）
+    async function downloadOcrFile(url, cacheKey, kind, onChunk) {
       const cached = await ocrCacheGet(cacheKey);
-      if (cached && cached.buffer) return cached.buffer;
+      if (kind === 'buffer' && cached && cached.buffer) {
+        if (onChunk) onChunk(cached.buffer.byteLength, cached.buffer.byteLength);
+        return cached.buffer;
+      }
+      if (kind === 'text' && cached && typeof cached.text === 'string') {
+        if (onChunk) onChunk(cached.text.length, cached.text.length);
+        return cached.text;
+      }
       const res = await fetch(url);
-      if (!res.ok) throw new Error('模型下载失败 HTTP ' + res.status);
-      const buffer = await res.arrayBuffer();
-      ocrCacheSet(cacheKey, { buffer: buffer, time: Date.now() });
-      return buffer;
-    }
-    // 下载字典文本（优先走 IndexedDB 缓存）
-    async function loadOcrModelText(url, cacheKey) {
-      const cached = await ocrCacheGet(cacheKey);
-      if (cached && typeof cached.text === 'string') return cached.text;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error('字典下载失败 HTTP ' + res.status);
+      if (!res.ok) throw new Error('下载失败 HTTP ' + res.status);
+      const total = parseInt(res.headers.get('Content-Length') || '0', 10) || 0;
+      if (res.body && res.body.getReader && total > 0) {
+        const reader = res.body.getReader();
+        const chunks = [];
+        let received = 0;
+        while (true) {
+          const r = await reader.read();
+          if (r.done) break;
+          chunks.push(r.value);
+          received += r.value.length;
+          if (onChunk) onChunk(received, total);
+        }
+        const buf = new Uint8Array(received);
+        let off = 0;
+        for (let i = 0; i < chunks.length; i++) { buf.set(chunks[i], off); off += chunks[i].length; }
+        if (kind === 'buffer') {
+          const buffer = buf.buffer;
+          ocrCacheSet(cacheKey, { buffer: buffer, time: Date.now() });
+          return buffer;
+        }
+        const text = new TextDecoder('utf-8').decode(buf);
+        ocrCacheSet(cacheKey, { text: text, time: Date.now() });
+        return text;
+      }
+      // 无法流式（无 content-length 或 reader 不支持）
+      if (kind === 'buffer') {
+        const buffer = await res.arrayBuffer();
+        if (onChunk) onChunk(buffer.byteLength, buffer.byteLength);
+        ocrCacheSet(cacheKey, { buffer: buffer, time: Date.now() });
+        return buffer;
+      }
       const text = await res.text();
+      if (onChunk) onChunk(text.length, text.length);
       ocrCacheSet(cacheKey, { text: text, time: Date.now() });
       return text;
     }
 
-    async function loadOcrEngine() {
+    function showOcrProgress(fraction, text) {
+      const wrap = document.getElementById('ocrProgressWrap');
+      const bar = document.getElementById('ocrProgressBar');
+      const txt = document.getElementById('ocrProgressText');
+      if (wrap) wrap.style.display = '';
+      const pct = Math.max(0, Math.min(100, Math.round(fraction * 100)));
+      if (bar) bar.style.width = pct + '%';
+      if (txt) txt.innerText = text || (pct + '%');
+    }
+    function hideOcrProgress() {
+      const wrap = document.getElementById('ocrProgressWrap');
+      if (wrap) wrap.style.display = 'none';
+    }
+
+    async function loadOcrEngine(onProgress) {
       if (ocrEnginePromise) return ocrEnginePromise;
       ocrEnginePromise = (async function () {
         const [esearchMod, ortMod] = await Promise.all([
@@ -982,12 +1066,22 @@
         if (ort.env && ort.env.wasm) {
           try { ort.env.wasm.wasmPaths = OCR_CDN.wasmDir; } catch (e) {}
         }
-        // 模型与字典：优先 IndexedDB 缓存，未命中才联网下载（下载后持久缓存）
+        // 三个文件并行下载，聚合字节进度
+        const files = { det: { r: 0, t: 0 }, rec: { r: 0, t: 0 }, dic: { r: 0, t: 0 } };
+        function agg() {
+          let r = 0, t = 0;
+          for (const k in files) { r += files[k].r; t += files[k].t; }
+          if (onProgress && t > 0) onProgress(Math.min(1, r / t));
+        }
+        function mkCb(k) {
+          return function (received, total) { files[k].r = received; files[k].t = total; agg(); };
+        }
         const [detBuf, recBuf, dic] = await Promise.all([
-          loadOcrModelBuffer(OCR_CDN.det, 'ppocr_det.onnx'),
-          loadOcrModelBuffer(OCR_CDN.rec, 'ppocr_rec.onnx'),
-          loadOcrModelText(OCR_CDN.dic, 'ppocr_keys_v1.txt')
+          downloadOcrFile(OCR_CDN.det, 'ppocr_det.onnx', 'buffer', mkCb('det')),
+          downloadOcrFile(OCR_CDN.rec, 'ppocr_rec.onnx', 'buffer', mkCb('rec')),
+          downloadOcrFile(OCR_CDN.dic, 'ppocr_keys_v1.txt', 'text', mkCb('dic'))
         ]);
+        if (onProgress) onProgress(1);
         return await init({
           det: { input: detBuf },
           rec: { input: recBuf, decodeDic: dic },
@@ -2631,6 +2725,31 @@
       });
     }
 
+    // ============ OCR 规则配置（每个字段一组关键词，提取方式按字段类型自动判断） ============
+    const DEFAULT_OCR_RULES = {
+      price: { keywords: ['¥', '￥', '价格', '金额', '实付', '合计', '总价', '售价', '单价', '应付', '收款'] },
+      orderNo: { keywords: ['订单号', '订单编号', '编号', '单号'] },
+      customer: { keywords: ['下单者', '收货人', '姓名', '客户', '联系人', '买家', '收件人'] },
+      address: { keywords: ['收货地址', '地址', '省', '市', '区', '县', '路', '街', '号'] },
+      spec: { keywords: ['规格', '型号', '颜色', '尺码', '款式', '尺寸'] }
+    };
+    let ocrRules = {};
+    function loadOcrRules() {
+      try {
+        const saved = JSON.parse(localStorage.getItem('orderOcrRules') || 'null');
+        ocrRules = (saved && typeof saved === 'object') ? saved : JSON.parse(JSON.stringify(DEFAULT_OCR_RULES));
+      } catch (e) {
+        ocrRules = JSON.parse(JSON.stringify(DEFAULT_OCR_RULES));
+      }
+    }
+    function saveOcrRules() {
+      try { localStorage.setItem('orderOcrRules', JSON.stringify(ocrRules)); } catch (e) {}
+    }
+    function getOcrKeywords(fieldKey) {
+      const rule = ocrRules[fieldKey];
+      return (rule && Array.isArray(rule.keywords)) ? rule.keywords : [];
+    }
+
     // ============ OCR 确定性规则填字段 ============
     function findLine(lines, predicate) {
       for (let i = 0; i < lines.length; i++) {
@@ -2641,11 +2760,6 @@
     function extractNumber(text) {
       const m = text.match(/(\d+(?:\.\d{1,2})?)/);
       return m ? m[1] : '';
-    }
-    function stripLabel(text, labels) {
-      let v = text;
-      labels.forEach(function (l) { if (l) v = v.split(l).join(''); });
-      return v.replace(/^[\s:：]+/, '').replace(/[\s:：]+$/, '').trim();
     }
     function extractFieldsByRules(lines) {
       const sorted = lines.slice().sort(function (a, b) { return a.cy - b.cy; });
@@ -2663,8 +2777,10 @@
       const mk = function (line, value, forceLow) {
         return { value: value, conf: line.score, low: forceLow || line.score < 0.7, source: line.text };
       };
+      const keywords = getOcrKeywords(key);
+      const kws = (keywords.length > 0) ? keywords : [label];
 
-      // 下拉字段：匹配选项文本
+      // 下拉字段：直接匹配选项文字（不依赖关键词）
       if (f.type === 'select' && f.options && f.options.length) {
         const line = findLine(lines, function (t) {
           return f.options.some(function (o) { return o.label && t.indexOf(o.label) >= 0; });
@@ -2676,72 +2792,87 @@
         return empty;
       }
 
-      // 价格/金额
-      if (key === 'price') {
-        const line = findLine(lines, function (t) { return /[¥￥]/.test(t) || /价格|金额|实付|合计|总价|售价|单价|应付|收款/.test(t); });
-        if (line) {
-          const num = extractNumber(line.text);
-          if (num) return mk(line, num);
-        }
-        const numLine = findLine(lines, function (t) { return /^\s*\d+(?:\.\d{1,2})?\s*$/.test(t); });
-        if (numLine) return mk(numLine, numLine.text.trim(), true);
-        return empty;
-      }
-
-      // 订单编号
-      if (key === 'orderNo') {
-        const line = findLine(lines, function (t) { return /订单号|订单编号|编号|单号/.test(t); });
-        if (line) {
-          const m = line.text.match(/[:：]?\s*([A-Za-z0-9\-]{6,})/);
-          const val = m ? m[1] : stripLabel(line.text, ['订单编号', '订单号', '编号', '单号']);
-          if (val) return mk(line, val);
-        }
-        const longNum = findLine(lines, function (t) { return /^\s*\d{8,}\s*$/.test(t); });
-        if (longNum) return mk(longNum, longNum.text.trim(), true);
-        return empty;
-      }
-
-      // 下单者/客户
-      if (key === 'customer') {
-        const line = findLine(lines, function (t) { return /下单者|收货人|姓名|客户|联系人|买家|收件人/.test(t); });
-        if (line) {
-          const val = stripLabel(line.text, ['下单者', '收货人', '姓名', '客户', '联系人', '买家', '收件人']);
-          if (val) return mk(line, val);
+      // 找第一个含任一关键词的行
+      const line = findLine(lines, function (t) {
+        return kws.some(function (k) { return k && t.indexOf(k) >= 0; });
+      });
+      if (!line) {
+        // 数字字段兜底：找纯数字行（标低置信度）
+        if (f.type === 'number') {
+          const numLine = findLine(lines, function (t) { return /^\s*\d+(?:\.\d{1,2})?\s*$/.test(t); });
+          if (numLine) return mk(numLine, numLine.text.trim(), true);
         }
         return empty;
       }
 
-      // 地址
-      if (key === 'address') {
-        const line = findLine(lines, function (t) { return /地址/.test(t) && t.length > 3; });
-        if (line) {
-          const val = stripLabel(line.text, ['收货地址', '地址']);
-          if (val) return mk(line, val);
-        }
-        const addrLine = findLine(lines, function (t) { return /省|市|区|县|路|街|号|栋|室|镇|乡/.test(t) && t.length > 5; });
-        if (addrLine) return mk(addrLine, addrLine.text.trim());
-        return empty;
+      // 提取值（按字段类型自动判断）
+      if (f.type === 'number') {
+        const num = extractNumber(line.text);
+        return num ? mk(line, num) : empty;
       }
+      if (f.type === 'textarea') {
+        // 取整行，去掉行首的"标签：冒号"前缀（如"收货地址：上海市xx路"→"上海市xx路"）
+        const val = line.text.replace(/^\s*[^:：\d]{1,10}[:：]\s*/, '').trim();
+        return val ? mk(line, val) : mk(line, line.text.trim());
+      }
+      // text 字段：去掉关键词和冒号后的剩余文字
+      let val = line.text;
+      kws.forEach(function (k) { if (k) val = val.split(k).join(''); });
+      val = val.replace(/^[\s:：]+/, '').trim();
+      if (!val) val = line.text.trim();
+      return mk(line, val);
+    }
 
-      // 规格
-      if (key === 'spec') {
-        const line = findLine(lines, function (t) { return /规格|型号|颜色|尺码|款式|尺寸/.test(t); });
-        if (line) {
-          const val = stripLabel(line.text, ['规格', '型号', '颜色', '尺码', '款式', '尺寸']);
-          if (val) return mk(line, val);
-        }
-        return empty;
-      }
-
-      // 通用：找含 label 关键词的行，取 label 后的值
-      if (label) {
-        const line = findLine(lines, function (t) { return t.indexOf(label) >= 0; });
-        if (line) {
-          const val = stripLabel(line.text, [label]);
-          if (val) return mk(line, val);
-        }
-      }
-      return empty;
+    // ============ 识别规则设置界面 ============
+    function openOcrRulesModal() {
+      renderOcrRulesList();
+      document.getElementById('ocrRulesModal').classList.add('show');
+    }
+    function renderOcrRulesList() {
+      const list = document.getElementById('ocrRulesList');
+      if (!list) return;
+      let html = '';
+      fieldsConfig.forEach(function (f) {
+        if (f.system || f.type === 'formula') return;
+        const kws = getOcrKeywords(f.key);
+        const kwsHtml = kws.map(function (k) {
+          return '<span class="ocr-kw">' + escapeHtml(k) +
+            '<button type="button" class="ocr-kw-del" onclick="removeOcrKeyword(\'' + escapeAttr(f.key) + '\', \'' + escapeAttr(k) + '\')">×</button></span>';
+        }).join('');
+        html += '<div class="ocr-rule-item">' +
+          '<div class="ocr-rule-label">' + escapeHtml(f.label) + '<span class="ocr-rule-type">' + escapeHtml(typeLabel(f.type)) + '</span></div>' +
+          '<div class="ocr-rule-kws">' + kwsHtml +
+            '<input type="text" class="ocr-kw-input" placeholder="输入关键词后回车" data-kw-field="' + escapeAttr(f.key) + '" onkeydown="onOcrKwKeydown(event, \'' + escapeAttr(f.key) + '\')">' +
+          '</div>' +
+          '</div>';
+      });
+      list.innerHTML = html;
+    }
+    function onOcrKwKeydown(e, fieldKey) {
+      if (e.key !== 'Enter') return;
+      const v = e.target.value.trim();
+      if (!v) return;
+      addOcrKeyword(fieldKey, v);
+    }
+    function addOcrKeyword(fieldKey, kw) {
+      if (!ocrRules[fieldKey]) ocrRules[fieldKey] = { keywords: [] };
+      if (!Array.isArray(ocrRules[fieldKey].keywords)) ocrRules[fieldKey].keywords = [];
+      if (ocrRules[fieldKey].keywords.indexOf(kw) >= 0) return;
+      ocrRules[fieldKey].keywords.push(kw);
+      saveOcrRules();
+      renderOcrRulesList();
+    }
+    function removeOcrKeyword(fieldKey, kw) {
+      const rule = ocrRules[fieldKey];
+      if (!rule || !Array.isArray(rule.keywords)) return;
+      rule.keywords = rule.keywords.filter(function (k) { return k !== kw; });
+      saveOcrRules();
+      renderOcrRulesList();
+    }
+    function resetOcrRules() {
+      ocrRules = JSON.parse(JSON.stringify(DEFAULT_OCR_RULES));
+      saveOcrRules();
+      renderOcrRulesList();
     }
 
     function renderOcrReview() {
@@ -4722,6 +4853,7 @@
     loadCollapsedDefaults();
     loadViewSettings();
     loadSortState();
+    loadOcrRules();
     document.body.setAttribute('data-mview', mobileViewMode);
     updateViewSwitchButtons();
     // 回填同步弹窗
@@ -4739,7 +4871,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.08.14-3'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.08.14-4'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
