@@ -113,6 +113,26 @@
   .close-x:hover { color: #333; }
   .modal-body { padding: 16px 18px; overflow-y: auto; flex: 1; }
   .modal-ftr { padding: 12px 18px; border-top: 1px solid #f0f0f0; display: flex; justify-content: flex-end; gap: 8px; }
+  /* 截图识别 */
+  .ocr-drop { display: block; border: 2px dashed #c9d6ff; border-radius: 8px; padding: 30px 16px; text-align: center; cursor: pointer; background: #f7faff; }
+  .ocr-drop:hover, .ocr-drop.dragover { border-color: #1a73e8; background: #eef4ff; }
+  .ocr-drop-icon { font-size: 32px; }
+  .ocr-drop-text { font-size: 15px; color: #333; margin-top: 6px; }
+  .ocr-drop-sub { font-size: 12px; color: #999; margin-top: 4px; }
+  .ocr-review { display: flex; gap: 16px; }
+  .ocr-review-img { flex: 1; min-width: 0; }
+  .ocr-review-fields { flex: 1; min-width: 0; }
+  .ocr-review-title { font-size: 13px; font-weight: 600; color: #555; margin-bottom: 8px; }
+  .ocr-field-row { display: flex; align-items: flex-start; gap: 8px; padding: 7px 0; border-bottom: 1px solid #f0f0f0; }
+  .ocr-field-row .ofl-label { width: 80px; flex-shrink: 0; font-size: 13px; color: #555; padding-top: 6px; }
+  .ocr-field-row .ofl-val { flex: 1; }
+  .ocr-field-row .ofl-val input, .ocr-field-row .ofl-val select, .ocr-field-row .ofl-val textarea { width: 100%; padding: 6px 8px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 14px; }
+  .ocr-field-row.low-conf .ofl-val input, .ocr-field-row.low-conf .ofl-val textarea { background: #fffbe6; border-color: #ffe58f; }
+  .ocr-low-badge { font-size: 11px; color: #b86100; background: #fff1b8; padding: 1px 5px; border-radius: 6px; margin-left: 4px; }
+  @media (max-width: 768px) {
+    .ocr-review { flex-direction: column; }
+    .ocr-field-row .ofl-label { width: 70px; }
+  }
   @media (max-width: 768px) {
     .modal { max-width: 100%; }
   }
@@ -236,7 +256,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.14-1</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.14-2</button>
      <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
      <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
@@ -302,6 +322,50 @@
     <div class="modal-ftr">
       <button class="btn btn-secondary" onclick="closeModal('orderModal')">取消</button>
       <button class="btn btn-primary" onclick="saveOrder()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 截图识别弹窗 ============ -->
+<div class="modal-mask" id="ocrModal">
+  <div class="modal modal-lg">
+    <div class="modal-hdr">
+      <h3>📷 截图识别订单</h3>
+      <button class="close-x" onclick="closeOcrModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div id="ocrUploadArea">
+        <label class="ocr-drop" id="ocrDrop">
+          <input type="file" accept="image/*" id="ocrFileInput" onchange="onOcrFileSelected(this)" style="display:none;">
+          <div class="ocr-drop-icon">📷</div>
+          <div class="ocr-drop-text">点击选择截图，或直接 Ctrl+V 粘贴</div>
+          <div class="ocr-drop-sub">识别完全在本机浏览器内完成，图片不会上传到任何服务器</div>
+        </label>
+        <div id="ocrPreviewWrap" style="display:none;text-align:center;margin-bottom:12px;">
+          <img id="ocrPreviewImg" style="max-width:100%;max-height:260px;border:1px solid #eee;border-radius:6px;" alt="">
+        </div>
+        <div id="ocrStatus" style="font-size:13px;color:#888;text-align:center;"></div>
+        <div style="text-align:center;margin-top:12px;">
+          <button class="btn btn-primary" id="ocrRunBtn" onclick="runOcr()" style="display:none;">🔍 开始识别</button>
+        </div>
+      </div>
+      <div id="ocrResultArea" style="display:none;">
+        <div class="ocr-review">
+          <div class="ocr-review-img">
+            <div class="ocr-review-title">原截图</div>
+            <img id="ocrReviewImg" style="max-width:100%;border:1px solid #eee;border-radius:6px;" alt="">
+          </div>
+          <div class="ocr-review-fields">
+            <div class="ocr-review-title">识别结果（黄色为低置信度，点字段可直接修改）</div>
+            <div id="ocrFieldList"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-secondary" onclick="closeOcrModal()">取消</button>
+      <button class="btn btn-secondary" id="ocrRePickBtn" onclick="resetOcrModal()" style="display:none;">重新选图</button>
+      <button class="btn btn-primary" id="ocrApplyBtn" onclick="applyOcrToForm()" style="display:none;">确认填充到表单</button>
     </div>
   </div>
 </div>
@@ -752,6 +816,143 @@
     let editingId = null;
     let syncToken = '';
     let syncGistId = '';
+
+    // ============ OCR 截图识别（本地 PaddleOCR 浏览器版） ============
+    let ocrEnginePromise = null;   // 懒加载的 OCR 引擎实例
+    let ocrCurrentImage = null;    // 当前截图 { dataUrl }
+    let ocrExtracted = null;       // 识别+规则后的字段 { fieldKey: { value, conf, low } }
+
+    const OCR_CDN = {
+      esearchOcr: 'https://cdn.jsdelivr.net/npm/esearch-ocr@8.5.2/+esm',
+      ort: 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.mjs',
+      wasmDir: 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/',
+      det: 'https://cdn.jsdelivr.net/npm/paddleocr-browser/dist/ppocr_det.onnx',
+      rec: 'https://cdn.jsdelivr.net/npm/paddleocr-browser/dist/ppocr_rec.onnx',
+      dic: 'https://cdn.jsdelivr.net/npm/paddleocr-browser/dist/ppocr_keys_v1.txt'
+    };
+
+    function openOcrModal() {
+      resetOcrModal();
+      document.getElementById('ocrModal').classList.add('show');
+      window.addEventListener('paste', onOcrPaste);
+    }
+    function closeOcrModal() {
+      document.getElementById('ocrModal').classList.remove('show');
+      window.removeEventListener('paste', onOcrPaste);
+    }
+    function resetOcrModal() {
+      ocrCurrentImage = null;
+      ocrExtracted = null;
+      const fi = document.getElementById('ocrFileInput');
+      if (fi) fi.value = '';
+      document.getElementById('ocrUploadArea').style.display = '';
+      document.getElementById('ocrResultArea').style.display = 'none';
+      document.getElementById('ocrPreviewWrap').style.display = 'none';
+      document.getElementById('ocrStatus').innerText = '';
+      document.getElementById('ocrRunBtn').style.display = 'none';
+      document.getElementById('ocrRePickBtn').style.display = 'none';
+      document.getElementById('ocrApplyBtn').style.display = 'none';
+    }
+    function onOcrPaste(e) {
+      const items = (e.clipboardData || {}).items || [];
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type && items[i].type.indexOf('image') === 0) {
+          const file = items[i].getAsFile();
+          if (file) { readOcrFile(file); e.preventDefault(); return; }
+        }
+      }
+    }
+    function onOcrFileSelected(input) {
+      const file = input.files && input.files[0];
+      if (file) readOcrFile(file);
+    }
+    function readOcrFile(file) {
+      const reader = new FileReader();
+      reader.onload = function (e) { setOcrImage(e.target.result); };
+      reader.readAsDataURL(file);
+    }
+    function setOcrImage(dataUrl) {
+      ocrCurrentImage = { dataUrl: dataUrl };
+      ocrExtracted = null;
+      document.getElementById('ocrPreviewImg').src = dataUrl;
+      document.getElementById('ocrPreviewWrap').style.display = '';
+      document.getElementById('ocrResultArea').style.display = 'none';
+      document.getElementById('ocrStatus').innerText = '已选择截图，点击「开始识别」';
+      document.getElementById('ocrRunBtn').style.display = '';
+      document.getElementById('ocrRePickBtn').style.display = '';
+      document.getElementById('ocrApplyBtn').style.display = 'none';
+    }
+
+    async function runOcr() {
+      if (!ocrCurrentImage) return;
+      const status = document.getElementById('ocrStatus');
+      const runBtn = document.getElementById('ocrRunBtn');
+      runBtn.disabled = true;
+      status.innerText = '正在加载 OCR 模型（首次约需下载几 MB，请稍候）...';
+      try {
+        const ocr = await loadOcrEngine();
+        status.innerText = '正在识别文字...';
+        const raw = await ocr.ocr(ocrCurrentImage.dataUrl);
+        const lines = normalizeOcrResult(raw);
+        status.innerText = '识别完成，共 ' + lines.length + ' 行文字，正在匹配字段...';
+        ocrExtracted = extractFieldsByRules(lines);
+        renderOcrReview();
+        status.innerText = '';
+        document.getElementById('ocrResultArea').style.display = '';
+        document.getElementById('ocrApplyBtn').style.display = '';
+      } catch (err) {
+        status.innerText = '❌ 识别失败：' + (err && err.message ? err.message : err);
+        console.error('OCR error', err);
+      } finally {
+        runBtn.disabled = false;
+      }
+    }
+
+    async function loadOcrEngine() {
+      if (ocrEnginePromise) return ocrEnginePromise;
+      ocrEnginePromise = (async function () {
+        const [esearchMod, ortMod] = await Promise.all([
+          import(OCR_CDN.esearchOcr),
+          import(OCR_CDN.ort)
+        ]);
+        const ort = ortMod.default || ortMod;
+        const esearch = esearchMod.default || esearchMod;
+        const init = esearch.init || esearchMod.init;
+        if (!init) throw new Error('OCR 库加载异常（init 缺失）');
+        if (ort.env && ort.env.wasm) {
+          try { ort.env.wasm.wasmPaths = OCR_CDN.wasmDir; } catch (e) {}
+        }
+        const dicRes = await fetch(OCR_CDN.dic);
+        if (!dicRes.ok) throw new Error('字典下载失败 HTTP ' + dicRes.status);
+        const dic = await dicRes.text();
+        return await init({
+          det: { input: OCR_CDN.det },
+          rec: { input: OCR_CDN.rec, decodeDic: dic },
+          ort: ort
+        });
+      })();
+      return ocrEnginePromise;
+    }
+
+    // 把 eSearch-OCR 的返回统一成 { text, score, box, cy }[]
+    function normalizeOcrResult(raw) {
+      let arr = raw;
+      if (raw && Array.isArray(raw.result)) arr = raw.result;
+      if (raw && !Array.isArray(raw) && raw.results && Array.isArray(raw.results)) arr = raw.results;
+      if (!Array.isArray(arr)) return [];
+      return arr.map(function (item, i) {
+        const text = String(item.text || item.txt || '').trim();
+        const score = (typeof item.score === 'number') ? item.score
+          : (typeof item.confidence === 'number' ? item.confidence : 1);
+        const box = item.box || item.points || null;
+        let cy = i;
+        if (box && box.length >= 4) {
+          const ys = box.map(function (p) { return p[1]; }).filter(function (n) { return typeof n === 'number'; });
+          if (ys.length) cy = ys.reduce(function (a, b) { return a + b; }, 0) / ys.length;
+        }
+        return { text: text, score: score, box: box, cy: cy };
+      }).filter(function (l) { return l.text; });
+    }
 
     // 行内编辑状态
     let currentInlineFieldKey = null;
@@ -2364,11 +2565,183 @@
       });
     }
 
+    // ============ OCR 确定性规则填字段 ============
+    function findLine(lines, predicate) {
+      for (let i = 0; i < lines.length; i++) {
+        if (predicate(lines[i].text)) return lines[i];
+      }
+      return null;
+    }
+    function extractNumber(text) {
+      const m = text.match(/(\d+(?:\.\d{1,2})?)/);
+      return m ? m[1] : '';
+    }
+    function stripLabel(text, labels) {
+      let v = text;
+      labels.forEach(function (l) { if (l) v = v.split(l).join(''); });
+      return v.replace(/^[\s:：]+/, '').replace(/[\s:：]+$/, '').trim();
+    }
+    function extractFieldsByRules(lines) {
+      const sorted = lines.slice().sort(function (a, b) { return a.cy - b.cy; });
+      const result = {};
+      fieldsConfig.forEach(function (f) {
+        if (f.system || f.type === 'formula') return;
+        result[f.key] = extractOneField(f, sorted);
+      });
+      return result;
+    }
+    function extractOneField(f, lines) {
+      const key = f.key;
+      const label = f.label || key;
+      const empty = { value: '', conf: 1, low: false };
+      const mk = function (line, value, forceLow) {
+        return { value: value, conf: line.score, low: forceLow || line.score < 0.7, source: line.text };
+      };
+
+      // 下拉字段：匹配选项文本
+      if (f.type === 'select' && f.options && f.options.length) {
+        const line = findLine(lines, function (t) {
+          return f.options.some(function (o) { return o.label && t.indexOf(o.label) >= 0; });
+        });
+        if (line) {
+          const matched = f.options.find(function (o) { return o.label && line.text.indexOf(o.label) >= 0; });
+          if (matched) return mk(line, matched.value);
+        }
+        return empty;
+      }
+
+      // 价格/金额
+      if (key === 'price') {
+        const line = findLine(lines, function (t) { return /[¥￥]/.test(t) || /价格|金额|实付|合计|总价|售价|单价|应付|收款/.test(t); });
+        if (line) {
+          const num = extractNumber(line.text);
+          if (num) return mk(line, num);
+        }
+        const numLine = findLine(lines, function (t) { return /^\s*\d+(?:\.\d{1,2})?\s*$/.test(t); });
+        if (numLine) return mk(numLine, numLine.text.trim(), true);
+        return empty;
+      }
+
+      // 订单编号
+      if (key === 'orderNo') {
+        const line = findLine(lines, function (t) { return /订单号|订单编号|编号|单号/.test(t); });
+        if (line) {
+          const m = line.text.match(/[:：]?\s*([A-Za-z0-9\-]{6,})/);
+          const val = m ? m[1] : stripLabel(line.text, ['订单编号', '订单号', '编号', '单号']);
+          if (val) return mk(line, val);
+        }
+        const longNum = findLine(lines, function (t) { return /^\s*\d{8,}\s*$/.test(t); });
+        if (longNum) return mk(longNum, longNum.text.trim(), true);
+        return empty;
+      }
+
+      // 下单者/客户
+      if (key === 'customer') {
+        const line = findLine(lines, function (t) { return /下单者|收货人|姓名|客户|联系人|买家|收件人/.test(t); });
+        if (line) {
+          const val = stripLabel(line.text, ['下单者', '收货人', '姓名', '客户', '联系人', '买家', '收件人']);
+          if (val) return mk(line, val);
+        }
+        return empty;
+      }
+
+      // 地址
+      if (key === 'address') {
+        const line = findLine(lines, function (t) { return /地址/.test(t) && t.length > 3; });
+        if (line) {
+          const val = stripLabel(line.text, ['收货地址', '地址']);
+          if (val) return mk(line, val);
+        }
+        const addrLine = findLine(lines, function (t) { return /省|市|区|县|路|街|号|栋|室|镇|乡/.test(t) && t.length > 5; });
+        if (addrLine) return mk(addrLine, addrLine.text.trim());
+        return empty;
+      }
+
+      // 规格
+      if (key === 'spec') {
+        const line = findLine(lines, function (t) { return /规格|型号|颜色|尺码|款式|尺寸/.test(t); });
+        if (line) {
+          const val = stripLabel(line.text, ['规格', '型号', '颜色', '尺码', '款式', '尺寸']);
+          if (val) return mk(line, val);
+        }
+        return empty;
+      }
+
+      // 通用：找含 label 关键词的行，取 label 后的值
+      if (label) {
+        const line = findLine(lines, function (t) { return t.indexOf(label) >= 0; });
+        if (line) {
+          const val = stripLabel(line.text, [label]);
+          if (val) return mk(line, val);
+        }
+      }
+      return empty;
+    }
+
+    function renderOcrReview() {
+      const list = document.getElementById('ocrFieldList');
+      document.getElementById('ocrReviewImg').src = ocrCurrentImage.dataUrl;
+      let html = '';
+      fieldsConfig.forEach(function (f) {
+        if (f.system || f.type === 'formula') return;
+        const ext = ocrExtracted[f.key] || { value: '', conf: 1, low: false };
+        const label = escapeHtml(f.label);
+        const low = !!ext.low;
+        const lowBadge = low ? '<span class="ocr-low-badge">低置信度</span>' : '';
+        const val = (ext.value != null && ext.value !== '') ? ext.value : '';
+        let inputHtml;
+        if (f.type === 'select' && f.options && f.options.length) {
+          inputHtml = '<select data-ocr-field="' + escapeAttr(f.key) + '">' +
+            '<option value="">-- 请选择 --</option>' +
+            f.options.map(function (o) {
+              const sel = String(val) === String(o.value) ? ' selected' : '';
+              return '<option value="' + escapeAttr(o.value) + '"' + sel + '>' + escapeHtml(o.label) + '</option>';
+            }).join('') + '</select>';
+        } else if (f.type === 'textarea') {
+          inputHtml = '<textarea data-ocr-field="' + escapeAttr(f.key) + '">' + escapeHtml(val) + '</textarea>';
+        } else {
+          inputHtml = '<input type="text" data-ocr-field="' + escapeAttr(f.key) + '" value="' + escapeAttr(val) + '">';
+        }
+        html += '<div class="ocr-field-row' + (low ? ' low-conf' : '') + '">' +
+          '<div class="ofl-label">' + label + lowBadge + '</div>' +
+          '<div class="ofl-val">' + inputHtml + '</div>' +
+          '</div>';
+      });
+      list.innerHTML = html;
+    }
+
+    function applyOcrToForm() {
+      const list = document.getElementById('ocrFieldList');
+      const inputs = list.querySelectorAll('[data-ocr-field]');
+      const body = document.getElementById('orderFormBody');
+      let filled = 0;
+      inputs.forEach(function (el) {
+        const key = el.getAttribute('data-ocr-field');
+        const val = el.value;
+        if (val === '' || val == null) return;
+        const f = fieldsConfig.find(function (x) { return x.key === key; });
+        if (f && f.type === 'imageText') {
+          const txtInput = body.querySelector('[data-field-txt="' + key + '"]');
+          if (txtInput) { txtInput.value = val; filled++; }
+          return;
+        }
+        const target = body.querySelector('[data-field="' + key + '"]');
+        if (!target) return;
+        target.value = val;
+        filled++;
+      });
+      closeOcrModal();
+      showToast('✅ 已填充 ' + filled + ' 个字段，请核对后保存');
+    }
+
     function openAddModal() {
       editingId = null;
       document.getElementById('orderModalTitle').innerText = '新增订单';
       const form = document.getElementById('orderFormBody');
-      form.innerHTML = buildProductPickerHtml() + buildFormHtml('add_', {});
+      form.innerHTML = '<div style="margin-bottom:12px;">' +
+        '<button type="button" class="btn btn-secondary btn-sm" onclick="openOcrModal()">📷 截图识别</button>' +
+        '<span style="font-size:12px;color:#999;margin-left:8px;">上传订单截图自动填写字段</span>' +
+        '</div>' + buildProductPickerHtml() + buildFormHtml('add_', {});
       document.getElementById('orderModal').classList.add('show');
     }
 
@@ -4300,7 +4673,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.08.14-1'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.08.14-2'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
