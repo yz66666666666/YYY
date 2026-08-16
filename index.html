@@ -256,7 +256,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.14-2</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.08.14-3</button>
      <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
      <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
@@ -908,6 +908,66 @@
       }
     }
 
+    // ============ IndexedDB 持久缓存模型文件（首次下载后，刷新页面也不再重新下载） ============
+    const OCR_DB_NAME = 'ocrModelCache';
+    const OCR_DB_VERSION = 1;
+    const OCR_STORE = 'models';
+    let ocrCacheDb = null;
+
+    function openOcrCache() {
+      if (ocrCacheDb) return Promise.resolve(ocrCacheDb);
+      return new Promise(function (resolve, reject) {
+        if (!window.indexedDB) { reject(new Error('浏览器不支持 IndexedDB')); return; }
+        const req = indexedDB.open(OCR_DB_NAME, OCR_DB_VERSION);
+        req.onupgradeneeded = function (e) {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains(OCR_STORE)) db.createObjectStore(OCR_STORE);
+        };
+        req.onsuccess = function () { ocrCacheDb = req.result; resolve(ocrCacheDb); };
+        req.onerror = function () { reject(req.error); };
+      });
+    }
+    function ocrCacheGet(key) {
+      return openOcrCache().then(function (db) {
+        return new Promise(function (resolve) {
+          const tx = db.transaction(OCR_STORE, 'readonly');
+          const req = tx.objectStore(OCR_STORE).get(key);
+          req.onsuccess = function () { resolve(req.result || null); };
+          req.onerror = function () { resolve(null); };
+        });
+      }).catch(function () { return null; });
+    }
+    function ocrCacheSet(key, value) {
+      return openOcrCache().then(function (db) {
+        return new Promise(function (resolve) {
+          const tx = db.transaction(OCR_STORE, 'readwrite');
+          tx.objectStore(OCR_STORE).put(value, key);
+          tx.oncomplete = function () { resolve(); };
+          tx.onerror = function () { resolve(); };
+        });
+      }).catch(function () {});
+    }
+    // 下载模型二进制（优先走 IndexedDB 缓存）
+    async function loadOcrModelBuffer(url, cacheKey) {
+      const cached = await ocrCacheGet(cacheKey);
+      if (cached && cached.buffer) return cached.buffer;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('模型下载失败 HTTP ' + res.status);
+      const buffer = await res.arrayBuffer();
+      ocrCacheSet(cacheKey, { buffer: buffer, time: Date.now() });
+      return buffer;
+    }
+    // 下载字典文本（优先走 IndexedDB 缓存）
+    async function loadOcrModelText(url, cacheKey) {
+      const cached = await ocrCacheGet(cacheKey);
+      if (cached && typeof cached.text === 'string') return cached.text;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('字典下载失败 HTTP ' + res.status);
+      const text = await res.text();
+      ocrCacheSet(cacheKey, { text: text, time: Date.now() });
+      return text;
+    }
+
     async function loadOcrEngine() {
       if (ocrEnginePromise) return ocrEnginePromise;
       ocrEnginePromise = (async function () {
@@ -922,12 +982,15 @@
         if (ort.env && ort.env.wasm) {
           try { ort.env.wasm.wasmPaths = OCR_CDN.wasmDir; } catch (e) {}
         }
-        const dicRes = await fetch(OCR_CDN.dic);
-        if (!dicRes.ok) throw new Error('字典下载失败 HTTP ' + dicRes.status);
-        const dic = await dicRes.text();
+        // 模型与字典：优先 IndexedDB 缓存，未命中才联网下载（下载后持久缓存）
+        const [detBuf, recBuf, dic] = await Promise.all([
+          loadOcrModelBuffer(OCR_CDN.det, 'ppocr_det.onnx'),
+          loadOcrModelBuffer(OCR_CDN.rec, 'ppocr_rec.onnx'),
+          loadOcrModelText(OCR_CDN.dic, 'ppocr_keys_v1.txt')
+        ]);
         return await init({
-          det: { input: OCR_CDN.det },
-          rec: { input: OCR_CDN.rec, decodeDic: dic },
+          det: { input: detBuf },
+          rec: { input: recBuf, decodeDic: dic },
           ort: ort
         });
       })();
@@ -935,16 +998,19 @@
     }
 
     // 把 eSearch-OCR 的返回统一成 { text, score, box, cy }[]
+    // eSearch-OCR 实际返回 { src: [{ text, mean, box, style }], ... }，置信度字段是 mean
     function normalizeOcrResult(raw) {
-      let arr = raw;
-      if (raw && Array.isArray(raw.result)) arr = raw.result;
-      if (raw && !Array.isArray(raw) && raw.results && Array.isArray(raw.results)) arr = raw.results;
-      if (!Array.isArray(arr)) return [];
+      let arr = null;
+      if (raw && Array.isArray(raw.src)) arr = raw.src;
+      else if (raw && Array.isArray(raw.parragraphs)) arr = raw.parragraphs;
+      else if (Array.isArray(raw)) arr = raw;
+      if (!arr) return [];
       return arr.map(function (item, i) {
-        const text = String(item.text || item.txt || '').trim();
-        const score = (typeof item.score === 'number') ? item.score
-          : (typeof item.confidence === 'number' ? item.confidence : 1);
-        const box = item.box || item.points || null;
+        const text = String(item.text || '').trim();
+        const score = (typeof item.mean === 'number') ? item.mean
+          : (typeof item.score === 'number' ? item.score
+            : (typeof item.confidence === 'number' ? item.confidence : 1));
+        const box = item.box || null;
         let cy = i;
         if (box && box.length >= 4) {
           const ys = box.map(function (p) { return p[1]; }).filter(function (n) { return typeof n === 'number'; });
@@ -4673,7 +4739,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.08.14-2'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.08.14-3'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
