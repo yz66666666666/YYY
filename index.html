@@ -255,6 +255,21 @@
 
 <div id="toastTip" class="toast-tip"></div>
 
+<!-- ============ 页内确认弹窗（替代浏览器原生 confirm） ============ -->
+<div class="modal-mask" id="confirmModal" style="z-index:1500;">
+  <div class="modal modal-sm">
+    <div class="modal-hdr">
+      <h3 id="confirmTitle">请确认</h3>
+      <button class="close-x" onclick="closeConfirm()">×</button>
+    </div>
+    <div class="modal-body" id="confirmBody"></div>
+    <div class="modal-ftr">
+      <button class="btn btn-secondary" onclick="closeConfirm()">取消</button>
+      <button class="btn btn-primary" id="confirmOkBtn" onclick="confirmOk()">确定</button>
+    </div>
+  </div>
+</div>
+
 <header>
   <div style="display:flex;align-items:center;gap:4px;">
     <div class="nav-btns">
@@ -264,7 +279,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-5</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-6</button>
      <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
      <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
@@ -1321,6 +1336,28 @@
     }
 
     // 恢复备份
+    // 把一份快照数据套用到当前状态（恢复备份 / 导入本地数据 共用）
+    // 注意：商品库也要一起恢复，否则会出现"商品库跟订单对不上"的幽灵数据
+    function restoreBackupFromObject(d) {
+      if (!d || typeof d !== 'object') return false;
+      if (d.fieldsConfig && d.fieldsConfig.length) {
+        fieldsConfig = mergeFieldsFromStorage(d.fieldsConfig);
+      }
+      if (d.fieldDefaults && typeof d.fieldDefaults === 'object') fieldDefaults = d.fieldDefaults;
+      if (d.fieldHistory && typeof d.fieldHistory === 'object') fieldHistory = d.fieldHistory;
+      if (Array.isArray(d.orders)) orders = d.orders;
+      if (Array.isArray(d.products)) products = d.products;
+      if (Array.isArray(d.statsConfig)) statsConfig = d.statsConfig;
+      // 同步设置：快照里有就用快照的，没有就保持当前（避免把同步配置弄丢）
+      if (typeof d.syncToken === 'string') syncToken = d.syncToken;
+      if (typeof d.syncGistId === 'string') syncGistId = d.syncGistId;
+      // 清掉已经不存在的订单的勾选状态，避免批量操作误伤
+      const idSet = {};
+      orders.forEach(o => { idSet[o.id] = true; });
+      Array.from(selectedOrders).forEach(id => { if (!idSet[id]) selectedOrders.delete(id); });
+      return true;
+    }
+
     function restoreBackup(storeName, backupId) {
       if (!backupDB) return Promise.resolve(false);
       return new Promise((resolve) => {
@@ -1331,12 +1368,7 @@
           req.onsuccess = function(e) {
             const record = e.target.result;
             if (record && record.data) {
-              const d = record.data;
-              if (d.fieldsConfig) fieldsConfig = d.fieldsConfig;
-              if (d.fieldDefaults) fieldDefaults = d.fieldDefaults;
-              if (d.fieldHistory) fieldHistory = d.fieldHistory;
-              if (d.orders) orders = d.orders;
-              if (d.statsConfig) statsConfig = d.statsConfig;
+              restoreBackupFromObject(record.data);
               saveData();
               render();
               resolve(true);
@@ -1486,15 +1518,61 @@
         renderBackupList(storeName);
       });
     }
-    // 轻量 toast 提示（替代 alert）
+    // 轻量 toast 提示（替代 alert）。带 ⚠️ 的自动显示成警示色
     let toastTimer = null;
     function showToast(msg) {
       const el = document.getElementById('toastTip');
       if (!el) return;
-      el.innerText = msg;
+      const s = String(msg);
+      el.innerText = s;
       el.classList.add('show');
+      if (s.indexOf('⚠️') === 0 || s.indexOf('❌') === 0) {
+        el.style.background = 'rgba(165,32,32,0.95)';
+      } else if (s.indexOf('ℹ️') === 0) {
+        el.style.background = 'rgba(30,80,160,0.95)';
+      } else {
+        el.style.background = 'rgba(30,30,30,0.92)';
+      }
       if (toastTimer) clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => { el.classList.remove('show'); }, 2600);
+      toastTimer = setTimeout(() => { el.classList.remove('show'); }, 2800);
+    }
+
+    // 页内确认弹窗（替代浏览器原生 confirm —— 原生弹窗在 modal 里会导致滚动异常甚至崩溃）
+    // askConfirm({ title, message, extra, okText, cancelText, danger, onOk })
+    let confirmOnOk = null;
+    function askConfirm(opt) {
+      opt = opt || {};
+      const mask = document.getElementById('confirmModal');
+      if (!mask) { // 极端兜底：页面上没有这个弹窗时，直接执行，不让流程卡住
+        if (typeof opt.onOk === 'function') opt.onOk();
+        return;
+      }
+      document.getElementById('confirmTitle').innerText = opt.title || '请确认';
+      let bodyHtml = '<div style="font-size:14px;color:#333;line-height:1.7;">' + escapeHtml(opt.message || '') + '</div>';
+      if (opt.extra) {
+        bodyHtml += '<div style="margin-top:10px;padding:8px 10px;background:#f6f8fa;border-radius:6px;font-size:12px;color:#666;line-height:1.6;">' + escapeHtml(opt.extra) + '</div>';
+      }
+      document.getElementById('confirmBody').innerHTML = bodyHtml;
+      const okBtn = document.getElementById('confirmOkBtn');
+      okBtn.innerText = opt.okText || '确定';
+      okBtn.className = 'btn ' + (opt.danger ? 'btn-danger' : 'btn-primary');
+      confirmOnOk = (typeof opt.onOk === 'function') ? opt.onOk : null;
+      mask.classList.add('show');
+      setTimeout(() => { try { okBtn.focus(); } catch (e) {} }, 30);
+    }
+    function closeConfirm() {
+      const mask = document.getElementById('confirmModal');
+      if (mask) mask.classList.remove('show');
+      confirmOnOk = null;
+    }
+    function confirmOk() {
+      const fn = confirmOnOk;
+      closeConfirm();
+      if (fn) { try { fn(); } catch (e) { console.error(e); } }
+    }
+    // 统一删除确认：danger 提示 + 取消/确认
+    function askDelete(message, onOk) {
+      askConfirm({ title: '确认删除', message: message, okText: '确认删除', danger: true, onOk: onOk });
     }
 
     // 批量选择状态
@@ -1520,11 +1598,21 @@
     }
     function escapeHtml(text) {
       if (text === null || text === undefined) return '';
-      return String(text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      return String(text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
     }
     function escapeAttr(text) {
       if (text === null || text === undefined) return '';
-      return String(text).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      return String(text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    }
+    // 用于把用户内容塞进 HTML 属性里的 JS 字符串（如 onclick="f('...')"）
+    // 反斜杠必须先转，否则 \" 会被解析成"转义引号"从而逃出字符串
+    function escapeJs(text) {
+      if (text === null || text === undefined) return '';
+      return String(text)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\r?\n/g, '\\n')
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
 
     // ============ 通用显示值 ============
@@ -1546,21 +1634,31 @@
 
     // ============ 自动生成表达式引擎 ============
     // 每日序号计数器，格式：{ "2026-07-30": { "orderNo": 5, "invoiceNo": 2 } }
+    // 注意：这里必须用【本地日期】做格子，不能用 UTC。
+    // 用 UTC 的话，北京时间每天早上 8 点格子归零，当天订单号会重复。
     let dailyCounters = {};
+
+    function localDateKey(d) {
+      const t = d || new Date();
+      return t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' + String(t.getDate()).padStart(2, '0');
+    }
+    // 供外部检查"某一时刻属于哪个计数器格子"（本地日期）
+    function seqBucketKey(d) {
+      return localDateKey(d);
+    }
 
     function loadDailyCounters() {
       try {
         const raw = localStorage.getItem('dailyCounters');
         if (raw) dailyCounters = JSON.parse(raw);
-        // 清理非今天的旧计数器（保留7天）
-        const today = new Date().toISOString().slice(0, 10);
-        const keys = Object.keys(dailyCounters);
-        for (const k of keys) {
-          if (k < today) {
-            const d = new Date(k);
-            const diff = (new Date(today) - d) / (1000 * 60 * 60 * 24);
-            if (diff > 7) delete dailyCounters[k];
-          }
+        // 清理旧计数器（保留7天），按本地日期比较
+        const today = localDateKey();
+        const todayTime = new Date(today + 'T00:00:00').getTime();
+        for (const k of Object.keys(dailyCounters)) {
+          if (k >= today) continue;
+          const kTime = new Date(k + 'T00:00:00').getTime();
+          if (isNaN(kTime)) { delete dailyCounters[k]; continue; }
+          if ((todayTime - kTime) / 86400000 > 7) delete dailyCounters[k];
         }
       } catch (e) { dailyCounters = {}; }
     }
@@ -1571,7 +1669,7 @@
 
     // 获取今日某个 key 的序号（自动递增）
     function nextDailySeq(seqKey) {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = localDateKey();
       if (!dailyCounters[today]) dailyCounters[today] = {};
       const current = dailyCounters[today][seqKey] || 0;
       const next = current + 1;
@@ -1691,17 +1789,18 @@
             if (!/(round|abs|ceil|floor)\s*\(/.test(inner)) { chosen = { c: c, j: j, inner: inner }; break; }
           }
           if (!chosen) break;
-          const placeholder = '___' + funcIdx + '___'; // 只用下划线+数字，字母会被后面的字符过滤清除
+          // 占位符用"99+序号+99"（纯数字，天然不会被任何过滤规则清掉，也不会跟字段名冲突）
+          const placeholder = '99' + funcIdx + '99';
           funcStack.push({ func: chosen.c.fn, args: chosen.inner });
           expr = expr.substring(0, chosen.c.idx) + placeholder + expr.substring(chosen.j + 1);
           funcIdx++;
         }
-        // 清除剩余不允许的字符（保留占位符中的下划线和数字，以及函数参数分隔逗号）
+        // 清除剩余不允许的字符（保留函数参数分隔逗号）
         expr = expr.replace(/[^0-9+\-*/().\s_,]/g, '').trim();
         // 恢复函数占位符
         for (let i = funcStack.length - 1; i >= 0; i--) {
           const item = funcStack[i];
-          const placeholder = '___' + i + '___';
+          const placeholder = '99' + i + '99';
           // 计算内部表达式
           let args = item.args;
           // 对内部表达式做同样的字段替换（如果有的话）
@@ -1712,9 +1811,9 @@
               args = args.split(k).join(substitutions[k]);
             }
           }
-          // 恢复内部的函数占位符
+          // 恢复内部的函数占位符（内层函数先算，这里用 0 占位，外层会重新代入）
           for (let j = funcStack.length - 1; j >= 0; j--) {
-            const ph = '___' + j + '___';
+            const ph = '99' + j + '99';
             args = args.split(ph).join('0');
           }
           // 计算（保留逗号分隔参数）
@@ -1723,12 +1822,18 @@
           const computedArgs = argParts.map(a => {
             a = a.trim();
             if (!a) return '0';
-            if (/^[+\-*/]/.test(a)) a = '1' + a;
-            a = a.replace(/[+\-*/]+$/, '');
-            if (!a) return '0';
+            // 先按原样当表达式算（负数参数如 abs(-5)、括号开头如 (价格-成本)/价格 都要保持原样）
+            const okAsIs = /^[-+]?\s*[0-9.(]/.test(a);
+            if (okAsIs) {
+              try { return String(Function('"use strict";return (' + a + ')')()); } catch (e) { /* 落到下面兜底 */ }
+            }
+            // 兜底：用户可能写的是"缺左操作数"的片段（如 "*2"、"+" ），补个 1 再算
+            const patched = '1' + a;
             try {
-              return String(Function('"use strict";return (' + a + ')')());
-            } catch(e) { return '0'; }
+              const v = Function('"use strict";return (' + patched + ')')();
+              if (typeof v === 'number' && isFinite(v)) return String(v);
+            } catch (e) {}
+            return '0';
           });
           let funcResult;
           if (item.func === 'round') {
@@ -1779,38 +1884,41 @@
     }
 
     // ============ 统计栏渲染 ============
-    function renderStats() {
-      const bar = document.getElementById('statsBar');
-      if (!bar) return;
-      if (statsConfig.length === 0) {
-        bar.innerHTML = '';
-        return;
-      }
-      const list = getFilteredOrders();
-      let html = '';
+    // 统计栏永远基于【全部订单】（不受搜索/筛选影响），所以只需要在数据变化时重算一次
+    let _statsValuesCache = null;   // [{label, val, icon, color}]
+    let _statsSig = '';             // 数据签名，变了才重算
+
+    function computeStatsValues() {
+      const sig = orders.length + '|' + JSON.stringify(statsConfig) + '|' + fieldsConfig.length;
+      if (_statsValuesCache && _statsSig === sig) return _statsValuesCache;
+      const list = orders;
+      const out = [];
       statsConfig.forEach(s => {
         let val = '';
         if (s.type === 'count') {
           val = list.length;
         } else if (s.type === 'count_filtered') {
-          val = list.filter(o => String(o[s.field]) === String(s.filterValue)).length;
+          let n = 0;
+          for (let i = 0; i < list.length; i++) {
+            if (String(list[i][s.field]) === String(s.filterValue)) n++;
+          }
+          val = n;
         } else if (s.type === 'sum') {
           const f = fieldsConfig.find(x => x.key === s.field);
           if (f) {
             let sum = 0;
             list.forEach(o => {
-              let v = o[s.field];
               if (f.type === 'formula') {
-                const r = evalFormula(f, o);
+                const r = evalFormulaCached(f, o);
                 if (r !== '') sum += Number(r) || 0;
               } else {
+                const v = o[s.field];
                 if (v !== '' && v !== null && v !== undefined) sum += Number(v) || 0;
               }
             });
-            val = (Math.round(sum * 100) / 100);
-            val = '¥ ' + val;
+            val = Math.round(sum * 100) / 100;
           } else {
-            val = '¥ 0';
+            val = 0;
           }
         } else if (s.type === 'avg') {
           const f = fieldsConfig.find(x => x.key === s.field);
@@ -1819,27 +1927,27 @@
             list.forEach(o => {
               let v;
               if (f.type === 'formula') {
-                const r = evalFormula(f, o);
+                const r = evalFormulaCached(f, o);
                 if (r !== '') { v = Number(r); } else { return; }
               } else {
                 v = Number(o[s.field]);
               }
               if (!isNaN(v) && isFinite(v)) { sum += v; cnt++; }
             });
-            val = cnt > 0 ? ('¥ ' + Math.round(sum / cnt * 100) / 100) : '¥ 0';
+            val = cnt > 0 ? Math.round(sum / cnt * 100) / 100 : 0;
           } else {
-            val = '¥ 0';
+            val = 0;
           }
         } else if (s.type === 'sum_status') {
           const f = fieldsConfig.find(x => x.key === s.field);
           if (f) {
             let sum = 0;
             list.forEach(o => {
-              let v = o[s.field];
               if (f.type === 'formula') {
-                const r = evalFormula(f, o);
+                const r = evalFormulaCached(f, o);
                 if (r !== '') sum += Number(r) || 0;
               } else {
+                const v = o[s.field];
                 if (v !== '' && v !== null && v !== undefined) sum += Number(v) || 0;
               }
             });
@@ -1848,12 +1956,31 @@
             val = 0;
           }
         }
+        out.push({ label: s.label, val: String(val), icon: s.icon || '📊', color: s.color || 'blue' });
+      });
+      _statsValuesCache = out;
+      _statsSig = sig;
+      return out;
+    }
+
+    function statsHtml() {
+      const vals = computeStatsValues();
+      let html = '';
+      vals.forEach(v => {
         html += '<div class="stat-card">' +
-          '<div class="stat-icon ' + (s.color || 'blue') + '">' + (s.icon || '📊') + '</div>' +
-          '<div class="stat-info"><div class="stat-val">' + escapeHtml(String(val)) + '</div><div class="stat-label">' + escapeHtml(s.label) + '</div></div>' +
+          '<div class="stat-icon ' + v.color + '">' + v.icon + '</div>' +
+          '<div class="stat-info"><div class="stat-val">' + escapeHtml(v.val) + '</div><div class="stat-label">' + escapeHtml(v.label) + '</div></div>' +
           '</div>';
       });
-      bar.innerHTML = html;
+      return html;
+    }
+
+    function renderStats() {
+      const bar = document.getElementById('statsBar');
+      if (!bar) return;
+      if (statsConfig.length === 0) { bar.innerHTML = ''; return; }
+      const html = statsHtml();
+      if (bar._lastHtml !== html) { bar.innerHTML = html; bar._lastHtml = html; }
     }
 
     // ============ 加载 / 保存数据 ============
@@ -1886,6 +2013,7 @@
               try {
                 const d = JSON.parse(r);
                 if (Array.isArray(d.orders)) orders = d.orders;
+                if (Array.isArray(d.products)) products = d.products;
               } catch(e){}
             }
           }
@@ -1926,6 +2054,8 @@
         savedAt: new Date().toISOString()
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      // 数据变了：清掉渲染缓存，保证统计栏/列表拿到的是新数据
+      invalidateRenderCaches();
       // 记录操作历史到 IndexedDB
       if (action) {
         saveHistorySnapshot(action);
@@ -1968,6 +2098,7 @@
           savedAt: new Date().toISOString()
         };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+        invalidateRenderCaches();
         render();
         showToast('↶ 已撤销：' + item.action);
       } finally {
@@ -1992,6 +2123,7 @@
           savedAt: new Date().toISOString()
         };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+        invalidateRenderCaches();
         render();
         showToast('↷ 已重做：' + item.action);
       } finally {
@@ -2001,24 +2133,76 @@
     }
 
     // ============ 渲染表格/卡片 ============
-    function render() {
+    // ============ 渲染性能优化 ============
+    // 每次 render 期间复用同一份"可见订单列表"和"公式结果"，避免同一份数据被反复算几十遍
+    let _renderListCache = null;     // 本次 render 的可见订单列表
+    let _formulaCache = null;        // 本次 render 的公式结果 Map：orderId + 分隔符 + fieldKey -> 结果
+    let _filterSigCache = null;      // 过滤条件签名 -> 列表（跨 render 复用）
+
+    function invalidateRenderCaches() {
+      _renderListCache = null;
+      _formulaCache = null;
+      _filterSigCache = null;
+      _statsValuesCache = null;
+      _statsSig = '';
+      const sf = document.getElementById('searchFieldSel');
+      if (sf) sf._sig = '';
+      const st = document.getElementById('statusFilter');
+      if (st) st._sig = '';
+      const th = document.getElementById('tableHead');
+      if (th) th._colsSig = '';
+    }
+
+    // 带缓存的公式求值（同一次 render 内同一订单同一字段只算一次）
+    function evalFormulaCached(field, order) {
+      if (!field || field.type !== 'formula') return '';
+      if (!_formulaCache) _formulaCache = new Map();
+      const k = order.id + '\u0001' + field.key;
+      if (_formulaCache.has(k)) return _formulaCache.get(k);
+      const v = evalFormula(field, order);
+      _formulaCache.set(k, v);
+      return v;
+    }
+
+    function render(forceFull) {
+      // 每次新渲染：清空一次性的缓存
+      _renderListCache = null;
+      _formulaCache = null;
+      if (forceFull) invalidateRenderCaches();
+
+      // 统计栏基于全部订单，内部有签名缓存，没变化时不会重建 DOM
       renderStats();
       renderStatusFilter();
       updateSearchFieldSel();
       renderTableHead();
-      renderTbody();
-      renderCards();
-      renderCompactList();
+      // 只渲染当前正在看的那个视图，另外两个跳过（省下 2/3 的 DOM 构建）
+      if (mobileViewMode === 'table') {
+        renderTbody();
+      } else if (mobileViewMode === 'card') {
+        renderCards();
+      } else {
+        renderCompactList();
+      }
       renderCompactHead();
       initManualOrderDrag();
       updateBatchBar();
     }
 
     function getFilteredOrders() {
+      if (_renderListCache) return _renderListCache;
       if (orderSortMode === 'manual') ensureManualOrderComplete();
-      const kw = document.getElementById('searchInput').value.trim().toLowerCase();
-      const sf = document.getElementById('statusFilter').value;
-      const sfd = document.getElementById('searchFieldSel').value;
+      const kwEl = document.getElementById('searchInput');
+      const sfEl = document.getElementById('statusFilter');
+      const sfdEl = document.getElementById('searchFieldSel');
+      const kw = kwEl ? kwEl.value.trim().toLowerCase() : '';
+      const sf = sfEl ? sfEl.value : '';
+      const sfd = sfdEl ? sfdEl.value : '';
+      // 过滤条件签名：条件没变就直接复用上次的结果
+      const sig = orders.length + '|' + kw + '|' + sf + '|' + sfd + '|' + orderSortMode + '|' + manualOrder.length + '|' + fieldsConfig.length;
+      if (_filterSigCache && _filterSigCache.sig === sig) {
+        _renderListCache = _filterSigCache.list;
+        return _renderListCache;
+      }
       const sField = sfd ? fieldsConfig.find(f => f.key === sfd) : null;
       const filtered = orders.filter(o => {
         if (sf) {
@@ -2037,10 +2221,12 @@
         return true;
       });
       if (orderSortMode === 'manual') {
-        // 手动排序：按 manualOrder 顺序，未列入的订单排最后（再按时间倒序）
+        // 手动排序：先把序号算成一张表，避免排序里反复 indexOf（原来每比较一次就扫一遍全部）
+        const rank = new Map();
+        for (let i = 0; i < manualOrder.length; i++) rank.set(manualOrder[i], i);
         filtered.sort((a, b) => {
-          const ia = manualOrder.indexOf(a.id);
-          const ib = manualOrder.indexOf(b.id);
+          const ia = rank.has(a.id) ? rank.get(a.id) : -1;
+          const ib = rank.has(b.id) ? rank.get(b.id) : -1;
           if (ia === -1 && ib === -1) return (b.createdAt || '').localeCompare(a.createdAt || '');
           if (ia === -1) return 1;
           if (ib === -1) return -1;
@@ -2051,6 +2237,8 @@
       } else {
         filtered.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
       }
+      _renderListCache = filtered;
+      _filterSigCache = { sig: sig, list: filtered };
       return filtered;
     }
 
@@ -2114,8 +2302,12 @@
       if (orderSortMode !== 'manual') { orderDragState = null; return; }
       const container = getOrderListContainer();
       if (!container) return;
-      orderRowNodes(container).forEach(el => bindOrderRowDrag(el, el.getAttribute('data-id')));
-      // 文档级鼠标监听只注册一次
+      // 性能优化：监听器只挂在"容器"上（事件委托），不再给每一行各挂 8 个。
+      // 500 行时这能省下约 4000 个监听器，是滚动/搜索卡顿的主因之一。
+      if (!container._dragBound) {
+        container._dragBound = true;
+        bindContainerDrag(container);
+      }
       if (!orderDragDocBound) {
         orderDragDocBound = true;
         document.addEventListener('mousemove', function (e) {
@@ -2134,51 +2326,71 @@
       }
     }
 
-    function bindOrderRowDrag(el, id) {
-      let timer = null, startX = 0, startY = 0;
-      const clear = function () { if (timer) { clearTimeout(timer); timer = null; } };
-      const start = function (x, y) {
+    // 容器级事件委托：一次绑定，管住所有行
+    let _dragPending = null;   // { el, id, timer, startX, startY }
+    function _dragClearPending() {
+      if (_dragPending && _dragPending.timer) { clearTimeout(_dragPending.timer); }
+      _dragPending = null;
+    }
+    function bindContainerDrag(container) {
+      const rowOf = function (target) {
+        const el = target && target.closest ? target.closest('[data-id]') : null;
+        return (el && container.contains(el)) ? el : null;
+      };
+      const startPending = function (el, x, y) {
         if (orderDragState) return;
-        startX = x; startY = y;
-        clear();
-        timer = setTimeout(function () { timer = null; beginOrderDrag(el, id); }, 450);
+        _dragClearPending();
+        const id = el.getAttribute('data-id');
+        const timer = setTimeout(function () {
+          _dragPending = null;
+          beginOrderDrag(el, id);
+        }, 450);
+        _dragPending = { el: el, id: id, timer: timer, startX: x, startY: y };
       };
       const jitterCancel = function (x, y) {
-        if (!orderDragState && (Math.abs(x - startX) > 10 || Math.abs(y - startY) > 10)) clear();
+        if (orderDragState || !_dragPending) return;
+        if (Math.abs(x - _dragPending.startX) > 10 || Math.abs(y - _dragPending.startY) > 10) _dragClearPending();
       };
 
       // 触摸
-      el.addEventListener('touchstart', function (e) {
+      container.addEventListener('touchstart', function (e) {
         if (!isDragHandleTarget(e)) return;
-        start(e.touches[0].clientX, e.touches[0].clientY);
+        const el = rowOf(e.target);
+        if (el && e.touches[0]) startPending(el, e.touches[0].clientX, e.touches[0].clientY);
       }, { passive: true });
-      el.addEventListener('touchmove', function (e) {
-        if (orderDragState && orderDragState.id === id) {
-          e.preventDefault(); // 拖拽时阻止页面滚动
-          moveDraggedOrder(e.touches[0].clientY);
-        } else {
+      container.addEventListener('touchmove', function (e) {
+        if (orderDragState) {
+          if (e.touches[0]) {
+            e.preventDefault();
+            moveDraggedOrder(e.touches[0].clientY);
+          }
+        } else if (e.touches[0]) {
           jitterCancel(e.touches[0].clientX, e.touches[0].clientY);
         }
       }, { passive: false });
-      el.addEventListener('touchend', function () {
-        clear();
-        if (orderDragState && orderDragState.id === id) finishOrderDrag();
+      container.addEventListener('touchend', function () {
+        _dragClearPending();
+        if (orderDragState) finishOrderDrag();
       }, { passive: true });
-      el.addEventListener('touchcancel', function () {
-        clear();
-        if (orderDragState && orderDragState.id === id) finishOrderDrag();
+      container.addEventListener('touchcancel', function () {
+        _dragClearPending();
+        if (orderDragState) finishOrderDrag();
       }, { passive: true });
 
       // 鼠标
-      el.addEventListener('mousedown', function (e) {
-        if (!isDragHandleTarget(e)) return;
+      container.addEventListener('mousedown', function (e) {
         if (e.button !== 0) return;
-        start(e.clientX, e.clientY);
+        if (!isDragHandleTarget(e)) return;
+        const el = rowOf(e.target);
+        if (el) startPending(el, e.clientX, e.clientY);
       });
-      el.addEventListener('mousemove', function (e) { jitterCancel(e.clientX, e.clientY); });
-      el.addEventListener('mouseup', function () { clear(); });
-      el.addEventListener('mouseleave', function () { if (!orderDragState) clear(); });
+      container.addEventListener('mousemove', function (e) { jitterCancel(e.clientX, e.clientY); });
+      container.addEventListener('mouseup', function () { _dragClearPending(); });
+      container.addEventListener('mouseleave', function () { if (!orderDragState) _dragClearPending(); });
     }
+
+    // 兼容旧接口（暂留，内部转成容器委托的清理）
+    function bindOrderRowDrag(el, id) { void el; void id; }
 
     function beginOrderDrag(el, id) {
       orderDragState = { id: id, el: el };
@@ -2235,19 +2447,24 @@
     function updateSearchFieldSel() {
       const sel = document.getElementById('searchFieldSel');
       if (!sel) return;
+      const sig = fieldsConfig.map(f => f.key + ':' + f.label).join('|');
+      if (sel._sig === sig) return;   // 字段没变就不重建，省掉每次渲染的无谓 DOM 操作
       const current = sel.value;
       let opts = '<option value="">全部字段</option>';
       fieldsConfig.forEach(f => {
         opts += '<option value="' + escapeAttr(f.key) + '">' + escapeHtml(f.label) + '</option>';
       });
       sel.innerHTML = opts;
+      sel._sig = sig;
       sel.value = current;
     }
 
     function renderStatusFilter() {
       const sel = document.getElementById('statusFilter');
-      const current = sel.value;
       const sf = fieldsConfig.find(f => f.key === 'status');
+      const sig = sf ? JSON.stringify(sf.options) : 'none';
+      if (sel._sig === sig) return;
+      const current = sel.value;
       let opts = '<option value="">全部状态</option>';
       if (sf && sf.options) {
         sf.options.forEach(o => {
@@ -2255,24 +2472,36 @@
         });
       }
       sel.innerHTML = opts;
+      sel._sig = sig;
+      // 原来记下的筛选值如果已经不存在了（选项被改过），自动回到"全部"
       sel.value = current;
+      if (sel.value !== current && current !== '') {
+        sel.value = '';
+        showToast('ℹ️ 原来的状态筛选值已不存在，已切回「全部状态」');
+      }
     }
 
     function renderTableHead() {
       const visibleFields = getVisibleFields('table');
       const filteredList = getFilteredOrders();
       const allChecked = filteredList.length > 0 && filteredList.every(o => selectedOrders.has(o.id));
-      const tr = '<tr>' +
-        '<th class="checkbox-cell"><input type="checkbox" id="selectAllCb" ' + (allChecked ? 'checked' : '') + ' onchange="toggleSelectAll(this.checked)"></th>' +
-        visibleFields.map(f => {
-          const label = escapeHtml(f.label);
-          if (f.key === 'orderNo') return '<th style="min-width:150px">' + label + '</th>';
-          if (f.type === 'textarea') return '<th style="min-width:200px">' + label + '</th>';
-          if (f.type === 'imageText') return '<th style="min-width:180px">' + label + '</th>';
-          return '<th>' + label + '</th>';
-        }).join('') +
-        '<th class="actions-cell">操作</th></tr>';
-      document.getElementById('tableHead').innerHTML = tr;
+      const th = document.getElementById('tableHead');
+      const colsSig = visibleFields.map(f => f.key + ':' + f.type).join('|');
+      if (th._colsSig !== colsSig) {
+        th.innerHTML = '<tr>' +
+          '<th class="checkbox-cell"><input type="checkbox" id="selectAllCb" onchange="toggleSelectAll(this.checked)"></th>' +
+          visibleFields.map(f => {
+            const label = escapeHtml(f.label);
+            if (f.key === 'orderNo') return '<th style="min-width:150px">' + label + '</th>';
+            if (f.type === 'textarea') return '<th style="min-width:200px">' + label + '</th>';
+            if (f.type === 'imageText') return '<th style="min-width:180px">' + label + '</th>';
+            return '<th>' + label + '</th>';
+          }).join('') +
+          '<th class="actions-cell">操作</th></tr>';
+        th._colsSig = colsSig;
+      }
+      const cb = document.getElementById('selectAllCb');
+      if (cb) cb.checked = allChecked;
     }
 
     function getStatusTagClass(value) {
@@ -2287,9 +2516,9 @@
 
     function renderCellValue(field, order) {
       if (field.type === 'formula') {
-        const result = evalFormula(field, order);
+        const result = evalFormulaCached(field, order);
         if (result === '' || result === null || result === undefined) return '<span style="color:#bbb">—</span>';
-        return '<span style="font-weight:500;color:#722ed1;">¥ ' + escapeHtml(String(result)) + '</span>';
+        return '<span style="font-weight:500;color:#722ed1;">' + escapeHtml(String(result)) + '</span>';
       }
       const val = order[field.key];
       if (val === null || val === undefined || val === '') return '<span style="color:#bbb">—</span>';
@@ -2302,7 +2531,7 @@
         const txt = (typeof val === 'object') ? (val.text || '') : val;
         let inner;
         if (img) {
-          inner = '<img src="' + escapeAttr(img) + '" alt="" onclick="event.stopPropagation();showImgPreview(\''+escapeAttr(img)+'\')">';
+          inner = '<img src="' + escapeAttr(img) + '" alt="" onclick="event.stopPropagation();showImgPreview(\''+escapeJs(img)+'\')">';
         } else {
           inner = '<div class="thumb">📷</div>';
         }
@@ -2312,7 +2541,7 @@
         return '<span style="white-space:pre-wrap">' + escapeHtml(val) + '</span>';
       }
       if (field.type === 'number') {
-        return '<span style="font-weight:500">¥ ' + escapeHtml(String(val)) + '</span>';
+        return '<span style="font-weight:500">' + escapeHtml(String(val)) + '</span>';
       }
       return escapeHtml(getDisplayText(field, val));
     }
@@ -2329,22 +2558,29 @@
       list.forEach(o => {
         const checked = selectedOrders.has(o.id) ? 'checked' : '';
         html += '<tr data-id="' + escapeAttr(o.id) + '">';
-        html += '<td class="checkbox-cell"><input type="checkbox" ' + checked + ' onchange="toggleSelectOrder(\'' + escapeAttr(o.id) + '\', this.checked)"></td>';
+        html += '<td class="checkbox-cell"><input type="checkbox" ' + checked + ' onchange="toggleSelectOrder(\'' + escapeJs(o.id) + '\', this.checked)"></td>';
         visibleFields.forEach(f => {
           const cellHtml = renderCellValue(f, o);
           const isFormula = f.type === 'formula';
           const onclick = isFormula
-            ? 'onclick="showFormulaDetail(\'' + escapeAttr(o.id) + '\', \'' + escapeAttr(f.key) + '\')" title="点击查看计算过程"'
-            : 'onclick="startInlineEdit(this, \'' + escapeAttr(o.id) + '\', \'' + escapeAttr(f.key) + '\')"';
+            ? 'onclick="showFormulaDetail(\'' + escapeJs(o.id) + '\', \'' + escapeJs(f.key) + '\')" title="点击查看计算过程"'
+            : 'onclick="startInlineEdit(this, \'' + escapeJs(o.id) + '\', \'' + escapeJs(f.key) + '\')"';
           html += '<td class="clickable" ' + onclick + '>' + cellHtml + '</td>';
         });
         html += '<td class="actions-cell">' +
-          '<button class="btn btn-secondary btn-sm" onclick="editOrder(\'' + escapeAttr(o.id) + '\')">编辑</button>' +
-          '<button class="btn btn-danger btn-sm" onclick="deleteOrder(\'' + escapeAttr(o.id) + '\')">删除</button>' +
+          '<button class="btn btn-secondary btn-sm" onclick="editOrder(\'' + escapeJs(o.id) + '\')">编辑</button>' +
+          '<button class="btn btn-danger btn-sm" onclick="deleteOrder(\'' + escapeJs(o.id) + '\')">删除</button>' +
           '</td>';
         html += '</tr>';
       });
       tbody.innerHTML = html;
+    }
+
+    // 卡片标题：固定用订单编号（不再跟着"字段列表第一个"变，避免拖动字段顺序后标题乱跳）
+    function cardTitleOf(o) {
+      const f = fieldsConfig.find(x => x.key === 'orderNo');
+      const v = f ? getDisplayText(f, o.orderNo) : (o.orderNo || '');
+      return v || o.id || '订单';
     }
 
     function renderCards() {
@@ -2359,20 +2595,20 @@
       list.forEach(o => {
         const checked = selectedOrders.has(o.id) ? 'checked' : '';
         html += '<div class="card" data-id="' + escapeAttr(o.id) + '">';
-        html += '<div class="card-checkbox"><input type="checkbox" ' + checked + ' onchange="toggleSelectOrder(\'' + escapeAttr(o.id) + '\', this.checked)"> 选择此订单</div>';
+        html += '<div class="card-checkbox"><input type="checkbox" ' + checked + ' onchange="toggleSelectOrder(\'' + escapeJs(o.id) + '\', this.checked)"> 选择此订单</div>';
         html += '<div class="card-header">';
-        html += '<div class="card-title">' + escapeHtml(getDisplayText(fieldsConfig[0] || {label:'订单'}, o[fieldsConfig[0] ? fieldsConfig[0].key : 'orderNo']) || '订单') + '</div>';
+        html += '<div class="card-title">' + escapeHtml(cardTitleOf(o)) + '</div>';
         html += '<div class="card-actions">';
-        html += '<button class="btn btn-secondary btn-sm" onclick="editOrder(\'' + escapeAttr(o.id) + '\')">编辑</button>';
-        html += '<button class="btn btn-danger btn-sm" onclick="deleteOrder(\'' + escapeAttr(o.id) + '\')">删除</button>';
+        html += '<button class="btn btn-secondary btn-sm" onclick="editOrder(\'' + escapeJs(o.id) + '\')">编辑</button>';
+        html += '<button class="btn btn-danger btn-sm" onclick="deleteOrder(\'' + escapeJs(o.id) + '\')">删除</button>';
         html += '</div></div>';
         visibleFields.forEach(f => {
           const label = escapeHtml(f.label);
           const valHtml = renderCellValue(f, o);
           const isFormula = f.type === 'formula';
           const onclick = isFormula
-            ? 'onclick="showFormulaDetail(\'' + escapeAttr(o.id) + '\', \'' + escapeAttr(f.key) + '\')" title="点击查看计算过程"'
-            : 'onclick="startInlineEdit(this, \'' + escapeAttr(o.id) + '\', \'' + escapeAttr(f.key) + '\')"';
+            ? 'onclick="showFormulaDetail(\'' + escapeJs(o.id) + '\', \'' + escapeJs(f.key) + '\')" title="点击查看计算过程"'
+            : 'onclick="startInlineEdit(this, \'' + escapeJs(o.id) + '\', \'' + escapeJs(f.key) + '\')"';
           html += '<div class="card-row">' +
             '<div class="card-label">' + label + '</div>' +
             '<div class="card-value" ' + onclick + '>' + valHtml + '</div>' +
@@ -2485,13 +2721,13 @@
       list.forEach(o => {
         const checked = selectedOrders.has(o.id) ? 'checked' : '';
         html += '<div class="compact-row" data-id="' + escapeAttr(o.id) + '">';
-        html += '<label class="cr-check" title="长按进入编辑"><input type="checkbox" ' + checked + ' onchange="toggleSelectOrder(\'' + escapeAttr(o.id) + '\', this.checked)"></label>';
+        html += '<label class="cr-check" title="长按进入编辑"><input type="checkbox" ' + checked + ' onchange="toggleSelectOrder(\'' + escapeJs(o.id) + '\', this.checked)"></label>';
         html += '<div class="compact-cells">';
         keyFields.forEach(f => {
           const isFormula = f.type === 'formula';
           const onclick = isFormula
-            ? 'onclick="showFormulaDetail(\'' + escapeAttr(o.id) + '\', \'' + escapeAttr(f.key) + '\')"'
-            : 'onclick="startInlineEdit(this, \'' + escapeAttr(o.id) + '\', \'' + escapeAttr(f.key) + '\')"';
+            ? 'onclick="showFormulaDetail(\'' + escapeJs(o.id) + '\', \'' + escapeJs(f.key) + '\')"'
+            : 'onclick="startInlineEdit(this, \'' + escapeJs(o.id) + '\', \'' + escapeJs(f.key) + '\')"';
           html += '<div class="compact-cell" ' + onclick + ' title="' + (isFormula ? escapeHtml(f.label) + '（点击查看计算过程）' : escapeHtml(f.label)) + '">' + renderCellValue(f, o) + '</div>';
         });
         html += '</div>';
@@ -2692,11 +2928,14 @@
       showToast('✅ 商品已保存');
     }
     function deleteProduct(i) {
-      if (!confirm('删除商品「' + products[i].name + '」？')) return;
-      products.splice(i, 1);
-      renderProductList();
-      saveData('删除商品');
-      showToast('已删除商品');
+      const p = products[i];
+      if (!p) return;
+      askDelete('删除商品「' + p.name + '」？', function () {
+        products.splice(i, 1);
+        renderProductList();
+        saveData('删除商品');
+        showToast('已删除商品');
+      });
     }
     // 新建订单：顶部"选择商品"一键填充
     function buildProductPickerHtml() {
@@ -2837,12 +3076,12 @@
         const kws = getOcrKeywords(f.key);
         const kwsHtml = kws.map(function (k) {
           return '<span class="ocr-kw">' + escapeHtml(k) +
-            '<button type="button" class="ocr-kw-del" onclick="removeOcrKeyword(\'' + escapeAttr(f.key) + '\', \'' + escapeAttr(k) + '\')">×</button></span>';
+            '<button type="button" class="ocr-kw-del" onclick="removeOcrKeyword(\'' + escapeJs(f.key) + '\', \'' + escapeAttr(k) + '\')">×</button></span>';
         }).join('');
         html += '<div class="ocr-rule-item">' +
           '<div class="ocr-rule-label">' + escapeHtml(f.label) + '<span class="ocr-rule-type">' + escapeHtml(typeLabel(f.type)) + '</span></div>' +
           '<div class="ocr-rule-kws">' + kwsHtml +
-            '<input type="text" class="ocr-kw-input" placeholder="输入关键词后回车" data-kw-field="' + escapeAttr(f.key) + '" onkeydown="onOcrKwKeydown(event, \'' + escapeAttr(f.key) + '\')">' +
+            '<input type="text" class="ocr-kw-input" placeholder="输入关键词后回车" data-kw-field="' + escapeJs(f.key) + '" onkeydown="onOcrKwKeydown(event, \'' + escapeJs(f.key) + '\')">' +
           '</div>' +
           '</div>';
       });
@@ -2971,7 +3210,7 @@
         }
         if (f.type === 'formula') {
           const result = evalFormula(f, data);
-          html += '<div class="form-row"><label>' + label + hiddenBadge + ' <span class="formula-field-badge">公式</span></label><div class="ctl" style="padding-top:7px;color:#722ed1;font-weight:500;">' + (result !== '' ? '¥ ' + escapeHtml(String(result)) : '—') + '</div></div>';
+          html += '<div class="form-row"><label>' + label + hiddenBadge + ' <span class="formula-field-badge">公式</span></label><div class="ctl" style="padding-top:7px;color:#722ed1;font-weight:500;">' + (result !== '' ? escapeHtml(String(result)) : '—') + '</div></div>';
           return;
         }
         const reqHtml = f.required ? ' class="req"' : '';
@@ -2987,14 +3226,14 @@
             chipsHtml = '<div class="defaults-picker" data-picker="' + escapeAttr(f.key) + '">' +
               '<div class="chips-list"' + (isCollapsed ? ' style="display:none;"' : '') + '>' +
               manual.map(v =>
-                '<div class="chip" onclick="formUseDefault(\'' + escapeAttr(f.key) + '\', \'' + escapeAttr(String(v).replace(/'/g, "\\'")) + '\')">' + escapeHtml(String(v)) + '</div>'
+                '<div class="chip" onclick="formUseDefault(\'' + escapeJs(f.key) + '\', \'' + escapeJs(String(v)) + '\')">' + escapeHtml(String(v)) + '</div>'
               ).join('') +
               history.map(v =>
-                '<div class="chip chip-yellow" onclick="formUseDefault(\'' + escapeAttr(f.key) + '\', \'' + escapeAttr(String(v).replace(/'/g, "\\'")) + '\')">' + escapeHtml(String(v)) + '</div>'
+                '<div class="chip chip-yellow" onclick="formUseDefault(\'' + escapeJs(f.key) + '\', \'' + escapeJs(String(v)) + '\')">' + escapeHtml(String(v)) + '</div>'
               ).join('') +
-              '<button class="chip-manage-btn" tabindex="-1" onclick="manageDefaultsClick(\'' + escapeAttr(f.key) + '\')">管理…</button>' +
+              '<button class="chip-manage-btn" tabindex="-1" onclick="manageDefaultsClick(\'' + escapeJs(f.key) + '\')">管理…</button>' +
               '</div>' +
-              '<div class="defaults-toggle" onclick="toggleDefaults(\'' + escapeAttr(f.key) + '\')">' + (isCollapsed ? '▶ 展开' : '▼ 收起') + '</div>' +
+              '<div class="defaults-toggle" onclick="toggleDefaults(\'' + escapeJs(f.key) + '\')">' + (isCollapsed ? '▶ 展开' : '▼ 收起') + '</div>' +
               '</div>';
           }
         }
@@ -3045,9 +3284,9 @@
         else { imgHtml = '<div class="add-plus">+</div>'; }
         let clearBtnHtml = '';
         if (img) {
-          clearBtnHtml = '<button type="button" class="clear-btn" onclick="event.preventDefault();clearImageField(\'' + escapeAttr(idPrefix + field.key) + '\')">×</button>';
+          clearBtnHtml = '<button type="button" class="clear-btn" onclick="event.preventDefault();clearImageField(\'' + escapeJs(idPrefix + field.key) + '\', event)">×</button>';
         }
-        const fileInputHtml = '<input type="file" accept="image/*" data-field-img="' + escapeAttr(field.key) + '" data-upload-for="' + escapeAttr(idPrefix + field.key) + '" style="display:none;" onchange="onUploadImage(event, \'' + escapeAttr(idPrefix + field.key) + '\')">';
+        const fileInputHtml = '<input type="file" accept="image/*" data-field-img="' + escapeJs(field.key) + '" data-upload-for="' + escapeJs(idPrefix + field.key) + '" style="display:none;" onchange="onUploadImage(event, \'' + escapeJs(idPrefix + field.key) + '\')">';
         const hiddenValue = img ? JSON.stringify({image: img, text: txt}) : (txt || '');
         return '' +
           '<div class="image-uploader">' +
@@ -3070,21 +3309,32 @@
       return '<input type="text" class="form-input" data-field="' + escapeAttr(field.key) + '" value="' + escapeAttr(textVal) + '"' + phText + '>';
     }
 
-    function clearImageField(idPrefixPlusKey) {
-      const container = event.target.closest('.image-uploader');
+    // 清空图片字段。ev 由调用方传入（不再依赖已废弃的全局 event）；找不到 ev 时按 idPrefixPlusKey 兜底定位
+    function clearImageField(idPrefixPlusKey, ev) {
+      let container = null;
+      if (ev && ev.target && ev.target.closest) container = ev.target.closest('.image-uploader');
+      if (!container) {
+        const body = document.getElementById('orderFormBody');
+        if (body) {
+          const hidden = body.querySelector('[data-field-hidden="' + idPrefixPlusKey + '"]');
+          if (hidden) container = hidden.closest('.image-uploader');
+        }
+      }
       if (!container) return;
       const label = container.querySelector('.preview');
+      if (!label) return;
       const imgEl = label.querySelector('img');
       const fileInput = label.querySelector('input[type=file]');
       const hiddenInput = container.querySelector('[data-field-hidden="' + idPrefixPlusKey + '"]');
       const txtInput = container.querySelector('[data-field-txt]');
-      fileInput.value = '';
+      if (fileInput) fileInput.value = '';
       if (imgEl) imgEl.remove();
       if (!label.querySelector('.add-plus')) {
         const plus = document.createElement('div');
         plus.className = 'add-plus';
         plus.textContent = '+';
-        label.insertBefore(plus, label.querySelector('.clear-btn'));
+        const cb = label.querySelector('.clear-btn');
+        if (cb) label.insertBefore(plus, cb); else label.appendChild(plus);
       }
       const clearBtn = label.querySelector('.clear-btn');
       if (clearBtn) clearBtn.remove();
@@ -3115,7 +3365,7 @@
           cb.type = 'button';
           cb.className = 'clear-btn';
           cb.textContent = '×';
-          cb.onclick = function(ev) { ev.preventDefault(); clearImageField(idPrefixPlusKey); };
+          cb.onclick = function(ev) { ev.preventDefault(); clearImageField(idPrefixPlusKey, ev); };
           label.appendChild(cb);
         }
         const hiddenInput = container.querySelector('[data-field-hidden="' + idPrefixPlusKey + '"]');
@@ -3177,6 +3427,25 @@
       return obj;
     }
 
+    // 表单校验失败时：把出错的那一项标红、滚到眼前并聚焦（替代原生 alert）
+    function markFormFieldError(field) {
+      const body = document.getElementById('orderFormBody');
+      if (!body) return;
+      let el = body.querySelector('[data-field="' + field.key + '"]');
+      if (field.type === 'imageText') {
+        const txt = body.querySelector('[data-field-txt="' + field.key + '"]');
+        if (txt) el = txt;
+      }
+      if (!el) return;
+      const box = el.closest('.image-uploader') || el;
+      const prev = box.style.boxShadow;
+      box.style.borderRadius = '6px';
+      box.style.boxShadow = '0 0 0 2px #ff4d4f';
+      try { box.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {}
+      try { el.focus({ preventScroll: true }); } catch (e) {}
+      setTimeout(function () { box.style.boxShadow = prev || ''; }, 2200);
+    }
+
     function saveOrder() {
       const data = collectFormData(editingId ? 'edit_' : 'add_');
       // 自动生成字段：新建时，若用户未手动填写则自动生成（消耗序号）
@@ -3222,7 +3491,9 @@
             empty = !v.image && !v.text;
           }
           if (empty) {
-            alert('请填写【' + f.label + '】');
+            // 换成页内提示 + 把出错的那一项标红并滚到眼前（不用浏览器原生 alert）
+            markFormFieldError(f);
+            showToast('⚠️ 请填写【' + f.label + '】');
             return;
           }
         }
@@ -3236,8 +3507,14 @@
           orders[idx] = merged;
         }
       } else {
+        // 生成不重复的订单 id（同一毫秒内连开两单也不会撞）
+        let newId = 'ord_' + Date.now() + '_' + Math.floor(Math.random() * 100000);
+        let guard = 0;
+        while (orders.some(o => o.id === newId) && guard++ < 50) {
+          newId = 'ord_' + Date.now() + '_' + Math.floor(Math.random() * 100000);
+        }
         const newOrder = Object.assign({
-          id: 'ord_' + Date.now() + '_' + Math.floor(Math.random()*1000),
+          id: newId,
           createdAt: new Date().toISOString()
         }, data);
         // orderNo 已经在上面 autoGen 处理过，不再硬编码 fallback
@@ -3279,12 +3556,22 @@
       });
     }
 
+    // 真正的删除动作（silent=true 时不弹确认，供内部/测试调用）
+    function deleteOrderById(id, silent) {
+      const doDelete = function () {
+        orders = orders.filter(o => o.id !== id);
+        selectedOrders.delete(id);
+        saveData('删除订单');
+        render();
+      };
+      if (silent) { doDelete(); return; }
+      const o = orders.find(x => x.id === id);
+      const label = o ? (o.orderNo || o.id) : id;
+      askDelete('确认删除订单「' + label + '」？', doDelete);
+    }
+
     function deleteOrder(id) {
-      if (!confirm('确认删除该订单？此操作不可撤销。')) return;
-      orders = orders.filter(o => o.id !== id);
-      selectedOrders.delete(id);
-      saveData('删除订单');
-      render();
+      deleteOrderById(id, false);
     }
 
     // ============ 批量操作 ============
@@ -3336,11 +3623,13 @@
     function batchDelete() {
       const count = selectedOrders.size;
       if (count === 0) return;
-      if (!confirm('确认删除选中的 ' + count + ' 个订单？此操作不可撤销。')) return;
-      orders = orders.filter(o => !selectedOrders.has(o.id));
-      selectedOrders.clear();
-      saveData('批量删除 ' + count + ' 个订单');
-      render();
+      askDelete('确认删除选中的 ' + count + ' 个订单？', function () {
+        orders = orders.filter(o => !selectedOrders.has(o.id));
+        selectedOrders.clear();
+        saveData('批量删除 ' + count + ' 个订单');
+        render();
+        showToast('已删除 ' + count + ' 个订单（可用 Ctrl+Z 撤销）');
+      });
     }
     function openBatchCalc() {
       const count = selectedOrders.size;
@@ -3364,7 +3653,7 @@
         html = '<span style="font-size:11px;color:#bbb;">暂无预设，点击右上角"+ 新增预设"添加</span>';
       } else {
         html = calcPresets.map((p, i) =>
-          '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:#e6f7ff;border:1px solid #91d5ff;border-radius:12px;cursor:pointer;font-size:12px;color:#1677ff;" title="' + escapeAttr(p.formula) + '" onclick="useCalcPreset(' + i + ')" oncontextmenu="event.preventDefault();openPresetEditor(' + i + ');">' +
+          '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:#e6f7ff;border:1px solid #91d5ff;border-radius:12px;cursor:pointer;font-size:12px;color:#1677ff;" title="' + escapeJs(p.formula) + '" onclick="useCalcPreset(' + i + ')" oncontextmenu="event.preventDefault();openPresetEditor(' + i + ');">' +
             escapeHtml(p.label) +
             '<span style="color:#bbb;font-size:10px;margin-left:2px;" onclick="event.stopPropagation();openPresetEditor(' + i + ')">✎</span>' +
             '<span style="color:#bbb;font-size:10px;" onclick="event.stopPropagation();deleteCalcPreset(' + i + ')">✕</span>' +
@@ -3571,7 +3860,7 @@
     }
     function execBatchCalcGroup() {
       const fieldKey = document.getElementById('batchGroupField').value;
-      if (!fieldKey) { alert('请先选择分组字段'); return; }
+      if (!fieldKey) { showToast('⚠️ 请先选择分组字段'); return; }
       const fieldDef = fieldsConfig.find(x => x.key === fieldKey);
       if (!fieldDef) return;
       const rules = collectBatchGroupRules();
@@ -3606,7 +3895,7 @@
         } else {
           sum += Number(result) || 0;
           validCount++;
-          displayResult = '<b style="color:#722ed1;">¥ ' + escapeHtml(String(result)) + '</b>';
+          displayResult = '<b style="color:#722ed1;">' + escapeHtml(String(result)) + '</b>';
         }
         tableHtml += '<tr><td style="padding:4px 8px;border:1px solid #e8e8e8;">' + orderLabel + '</td>' +
           '<td style="padding:4px 8px;border:1px solid #e8e8e8;">' + gvDisplay + '</td>' +
@@ -3622,10 +3911,10 @@
       let html = '<div style="padding:12px;background:#f6ffed;border:1px solid #b7eb8f;border-radius:6px;font-size:14px;">' +
         '<div style="margin-bottom:4px;">📊 <b>汇总</b>（共 ' + validCount + ' 个有效结果）</div>' +
         '<div style="display:flex;gap:24px;flex-wrap:wrap;">' +
-        '<span>求和：<b style="color:#52c41a;">¥ ' + (Math.round(sum * 100) / 100) + '</b></span>' +
-        '<span>平均：<b style="color:#1677ff;">¥ ' + avg + '</b></span>' +
-        '<span>最大：<b style="color:#fa8c16;">¥ ' + maxVal + '</b></span>' +
-        '<span>最小：<b style="color:#fa541c;">¥ ' + minVal + '</b></span>' +
+        '<span>求和：<b style="color:#52c41a;">' + (Math.round(sum * 100) / 100) + '</b></span>' +
+        '<span>平均：<b style="color:#1677ff;">' + avg + '</b></span>' +
+        '<span>最大：<b style="color:#fa8c16;">' + maxVal + '</b></span>' +
+        '<span>最小：<b style="color:#fa541c;">' + minVal + '</b></span>' +
         '</div></div>';
       html += '<div style="margin-top:10px;font-size:13px;color:#1677ff;cursor:pointer;user-select:none;" onclick="toggleBatchDetail()"><span id="batchDetailArrow">▶</span> 查看订单明细（' + selectedList.length + ' 条）</div>';
       html += '<div id="batchDetailWrap" style="display:none;margin-top:8px;overflow-x:auto;">' + tableHtml + '</div>';
@@ -3659,7 +3948,7 @@
         } else {
           sum += Number(result) || 0;
           validCount++;
-          displayResult = '<b style="color:#722ed1;">¥ ' + escapeHtml(String(result)) + '</b>';
+          displayResult = '<b style="color:#722ed1;">' + escapeHtml(String(result)) + '</b>';
         }
         tableHtml += '<tr><td style="padding:4px 8px;border:1px solid #e8e8e8;">' + orderLabel + '</td>' +
           '<td style="padding:4px 8px;border:1px solid #e8e8e8;text-align:right;">' + displayResult + '</td>' +
@@ -3674,10 +3963,10 @@
       let html = '<div style="padding:12px;background:#f6ffed;border:1px solid #b7eb8f;border-radius:6px;font-size:14px;">' +
         '<div style="margin-bottom:4px;">📊 <b>汇总</b>（共 ' + validCount + ' 个有效结果）</div>' +
         '<div style="display:flex;gap:24px;flex-wrap:wrap;">' +
-        '<span>求和：<b style="color:#52c41a;">¥ ' + (Math.round(sum * 100) / 100) + '</b></span>' +
-        '<span>平均：<b style="color:#1677ff;">¥ ' + avg + '</b></span>' +
-        '<span>最大：<b style="color:#fa8c16;">¥ ' + maxVal + '</b></span>' +
-        '<span>最小：<b style="color:#fa541c;">¥ ' + minVal + '</b></span>' +
+        '<span>求和：<b style="color:#52c41a;">' + (Math.round(sum * 100) / 100) + '</b></span>' +
+        '<span>平均：<b style="color:#1677ff;">' + avg + '</b></span>' +
+        '<span>最大：<b style="color:#fa8c16;">' + maxVal + '</b></span>' +
+        '<span>最小：<b style="color:#fa541c;">' + minVal + '</b></span>' +
         '</div></div>';
       html += '<div style="margin-top:10px;font-size:13px;color:#1677ff;cursor:pointer;user-select:none;" onclick="toggleBatchDetail()"><span id="batchDetailArrow">▶</span> 查看订单明细（' + selectedList.length + ' 条）</div>';
       html += '<div id="batchDetailWrap" style="display:none;margin-top:8px;overflow-x:auto;">' + tableHtml + '</div>';
@@ -3782,7 +4071,7 @@
           html += '<div class="chips-list" style="flex-wrap:wrap;">';
           field.options.forEach(o => {
             const active = (val === o.value) ? ' chip-active' : '';
-            html += '<div class="chip' + active + '" onclick="ieSelectOption(\'' + escapeAttr(o.value) + '\')">' + escapeHtml(o.label) + '</div>';
+            html += '<div class="chip' + active + '" onclick="ieSelectOption(\'' + escapeJs(o.value) + '\')">' + escapeHtml(o.label) + '</div>';
           });
           html += '</div>';
         }
@@ -3811,14 +4100,14 @@
         html += '<div class="defaults-picker" data-picker="' + escapeAttr(field.key) + '">';
         html += '<div class="chips-list"' + (isCollapsed ? ' style="display:none;"' : '') + '>';
         manual.forEach(v => {
-          html += '<div class="chip" onclick="ieUseDefault(\'' + escapeAttr(String(v).replace(/'/g,"\\'")) + '\')">' + escapeHtml(String(v)) + '</div>';
+          html += '<div class="chip" onclick="ieUseDefault(\'' + escapeJs(String(v)) + '\')">' + escapeHtml(String(v)) + '</div>';
         });
         history.forEach(v => {
-          html += '<div class="chip chip-yellow" onclick="ieUseDefault(\'' + escapeAttr(String(v).replace(/'/g,"\\'")) + '\')">' + escapeHtml(String(v)) + '</div>';
+          html += '<div class="chip chip-yellow" onclick="ieUseDefault(\'' + escapeJs(String(v)) + '\')">' + escapeHtml(String(v)) + '</div>';
         });
-        html += '<button class="chip-manage-btn" onclick="manageDefaultsClick(\'' + escapeAttr(field.key) + '\')">管理…</button>';
+        html += '<button class="chip-manage-btn" onclick="manageDefaultsClick(\'' + escapeJs(field.key) + '\')">管理…</button>';
         html += '</div>';
-        html += '<div class="defaults-toggle" onclick="toggleDefaults(\'' + escapeAttr(field.key) + '\')">' + (isCollapsed ? '▶ 展开' : '▼ 收起') + '</div>';
+        html += '<div class="defaults-toggle" onclick="toggleDefaults(\'' + escapeJs(field.key) + '\')">' + (isCollapsed ? '▶ 展开' : '▼ 收起') + '</div>';
         html += '</div>';
       }
       return html;
@@ -3955,7 +4244,7 @@
           empty = !newVal.image && !newVal.text;
         }
         if (empty) {
-          alert('【' + field.label + '】是必填项');
+          showToast('⚠️ 【' + field.label + '】是必填项');
           return;
         }
       }
@@ -4049,8 +4338,8 @@
       let html = '';
       tempOptionsBuffer.forEach((o, i) => {
         html += '<li>' +
-          '<span>标识</span><input placeholder="value英文标识，如 pending" value="' + escapeAttr(o.value) + '" oninput="tempOptionsBuffer['+i+'].value=this.value">' +
-          '<span>显示</span><input placeholder="显示文本，如 待处理" value="' + escapeAttr(o.label) + '" oninput="tempOptionsBuffer['+i+'].label=this.value">' +
+          '<span>标识</span><input placeholder="value英文标识，如 pending" value="' + escapeJs(o.value) + '" oninput="tempOptionsBuffer['+i+'].value=this.value">' +
+          '<span>显示</span><input placeholder="显示文本，如 待处理" value="' + escapeJs(o.label) + '" oninput="tempOptionsBuffer['+i+'].label=this.value">' +
           '<button class="btn btn-danger btn-sm" onclick="tempOptionsBuffer.splice('+i+',1);renderOptsList()">×</button>' +
           '</li>';
       });
@@ -4067,11 +4356,11 @@
       for (let i = 0; i < tempOptionsBuffer.length; i++) {
         const o = tempOptionsBuffer[i];
         if (!o.value || !o.label) {
-          alert('第 ' + (i+1) + ' 行：标识和显示文本都不能空');
+          showToast('⚠️ 第 ' + (i+1) + ' 行：标识和显示文本都不能空');
           return;
         }
         if (map[o.value]) {
-          alert('标识重复：' + o.value);
+          showToast('⚠️ 标识重复：' + o.value);
           return;
         }
         map[o.value] = true;
@@ -4099,7 +4388,7 @@
         html += '<span class="drag-handle" title="拖动调整顺序">⋮⋮</span>';
         html += '<span class="f-label">';
         if (!f.builtin || f.preset) {
-          html += '<input class="f-editable" value="' + escapeAttr(f.label) + '" oninput="updateFieldLabel('+i+', this.value)">';
+          html += '<input class="f-editable" value="' + escapeJs(f.label) + '" oninput="updateFieldLabel('+i+', this.value)">';
         } else {
           html += escapeHtml(f.label);
         }
@@ -4131,25 +4420,25 @@
           if (f.type === 'formula') {
             const groupOn = !!(f.groupEnabled && f.groupField);
             html += '<div class="formula-expr" style="margin-left:8px;display:flex;align-items:center;gap:6px;">' +
-              '<input class="f-editable" placeholder="默认公式（未匹配分组时用），如 价格*2" value="' + escapeAttr(f.formula || '') + '" oninput="updateFieldFormula('+i+', this.value)" style="flex:1;">' +
+              '<input class="f-editable" placeholder="默认公式（未匹配分组时用），如 价格*2" value="' + escapeJs(f.formula || '') + '" oninput="updateFieldFormula('+i+', this.value)" style="flex:1;">' +
               '<button class="btn btn-secondary btn-sm" onclick="openFormulaHelp()" title="公式帮助">?</button>' +
               '<button class="btn btn-secondary btn-sm" style="' + (groupOn ? 'background:#e6fffb;border-color:#87e8de;color:#006d75;' : '') + '" onclick="openGroupFormulaModal('+i+')" title="按字段分组，用不同公式计算">' + (groupOn ? '✓ 分组' : '分组') + '</button>' +
               '</div>';
           }
           // 选项（select）
           if (f.type !== 'formula') {
-            html += '<button class="btn btn-secondary btn-sm" onclick="openOptionsModal(\'' + escapeAttr(f.key) + '\')">选项</button>';
+            html += '<button class="btn btn-secondary btn-sm" onclick="openOptionsModal(\'' + escapeJs(f.key) + '\')">选项</button>';
           }
           // 默认值管理（非textarea非select非datetime非formula）
           if (f.type !== 'textarea' && f.type !== 'select' && f.type !== 'datetime' && f.type !== 'formula') {
-            html += '<button class="btn btn-secondary btn-sm" onclick="manageDefaultsClick(\'' + escapeAttr(f.key) + '\')">默认值</button>';
+            html += '<button class="btn btn-secondary btn-sm" onclick="manageDefaultsClick(\'' + escapeJs(f.key) + '\')">默认值</button>';
           }
           // 删除
-          html += '<button class="btn btn-danger btn-sm" onclick="deleteFieldItem('+i+')">删除</button>';
+          html += '<button class="btn btn-danger btn-sm" onclick="deleteFieldByKey(\'' + escapeJs(f.key) + '\')">删除</button>';
         } else {
           // 内置字段：允许改标签、改位置（拖拽）、可隐藏，但不能改类型/不能删
           if (f.key === 'orderNo') {
-            html += '<button class="btn btn-secondary btn-sm" onclick="manageDefaultsClick(\'' + escapeAttr(f.key) + '\')">默认值</button>';
+            html += '<button class="btn btn-secondary btn-sm" onclick="manageDefaultsClick(\'' + escapeJs(f.key) + '\')">默认值</button>';
           }
           // 隐藏（所有字段都可隐藏）
           html += '<label style="display:flex;align-items:center;gap:4px;font-size:12px;color:' + (f.hidden ? '#722ed1' : '#888') + ';">' +
@@ -4240,7 +4529,7 @@
         fieldDef.options.forEach(o => {
           html += '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">' +
             '<span style="flex:0 0 90px;font-size:13px;color:#333;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeAttr(o.label) + '">' + escapeHtml(o.label) + '</span>' +
-            '<input class="form-input" style="flex:1;" placeholder="如 价格*0.9-成本" value="' + escapeAttr(tempGroupFormulaOf(o.value)) + '" oninput="setTempGroupFormula(\'' + escapeAttr(o.value) + '\', this.value)">' +
+            '<input class="form-input" style="flex:1;" placeholder="如 价格*0.9-成本" value="' + escapeJs(tempGroupFormulaOf(o.value)) + '" oninput="setTempGroupFormula(\'' + escapeJs(o.value) + '\', this.value)">' +
             '</div>';
         });
         container.innerHTML = html;
@@ -4253,8 +4542,8 @@
         let html = '';
         tempGroupRules.forEach((r, idx) => {
           html += '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">' +
-            '<input class="form-input" style="flex:0 0 110px;" placeholder="字段值" value="' + escapeAttr(r.value) + '" oninput="tempGroupRules['+idx+'].value=this.value">' +
-            '<input class="form-input" style="flex:1;" placeholder="该值的公式" value="' + escapeAttr(r.formula) + '" oninput="tempGroupRules['+idx+'].formula=this.value">' +
+            '<input class="form-input" style="flex:0 0 110px;" placeholder="字段值" value="' + escapeJs(r.value) + '" oninput="tempGroupRules['+idx+'].value=this.value">' +
+            '<input class="form-input" style="flex:1;" placeholder="该值的公式" value="' + escapeJs(r.formula) + '" oninput="tempGroupRules['+idx+'].formula=this.value">' +
             '<button class="btn btn-danger btn-sm" onclick="tempGroupRules.splice('+idx+',1);renderGroupFormulaRules()">×</button>' +
             '</div>';
         });
@@ -4275,7 +4564,7 @@
         delete f.groupRules;
       } else {
         const fieldKey = document.getElementById('groupFormulaField').value;
-        if (!fieldKey) { alert('请选择分组字段'); return; }
+        if (!fieldKey) { showToast('⚠️ 请选择分组字段'); return; }
         const rules = {};
         tempGroupRules.forEach(r => {
           if (r.value !== '' && String(r.formula).trim() !== '') rules[r.value] = String(r.formula).trim();
@@ -4458,15 +4747,31 @@
     }
     function updateFieldRequired(i, v) { fieldsConfig[i].required = v; }
     function updateFieldHidden(i, v) { fieldsConfig[i].hidden = v; saveData('修改字段隐藏设置'); render(); }
+
+    // 按字段唯一 key 删除（不再依赖"第几行"，避免列表重绘后错位删错字段）
+    function deleteFieldByKey(key, silent) {
+      const idx = fieldsConfig.findIndex(f => f.key === key);
+      if (idx < 0) return;
+      if (fieldsConfig[idx].builtin) { showToast('内置字段不可删除'); return; }
+      const doDelete = function () {
+        fieldsConfig.splice(idx, 1);
+        renderFieldsSettings();
+        render();
+      };
+      if (silent) { doDelete(); return; }
+      const f = fieldsConfig[idx];
+      askDelete('删除字段「' + f.label + '」？',
+        doDelete);
+    }
+    // 旧接口（按行号），保留兼容
     function deleteFieldItem(i) {
-      if (fieldsConfig[i].builtin) return;
-      if (!confirm('删除字段「' + fieldsConfig[i].label + '」？现有订单数据中的该字段内容将保留但不再显示。')) return;
-      fieldsConfig.splice(i, 1);
-      renderFieldsSettings();
+      const f = fieldsConfig[i];
+      if (!f) return;
+      deleteFieldByKey(f.key, false);
     }
     function addNewField() {
       const label = document.getElementById('newFieldLabel').value.trim();
-      if (!label) { alert('请输入字段名'); return; }
+      if (!label) { showToast('⚠️ 请输入字段名'); return; }
       const type = document.getElementById('newFieldType').value;
       const req  = document.getElementById('newFieldRequired').checked;
       let key = 'custom_' + Math.random().toString(36).slice(2, 8);
@@ -4524,7 +4829,7 @@
       // 确保核心字段存在
       const missing = CORE_FIELDS.filter(k => !fieldsConfig.find(f => f.key === k));
       if (missing.length) {
-        alert('缺少内置字段：' + missing.join('、') + '。已自动恢复。');
+        showToast('⚠️ 缺少内置字段：' + missing.join('、') + '。已自动恢复。');
         missing.forEach(k => {
           const def = DEFAULT_FIELDS.find(f => f.key === k);
           if (def) fieldsConfig.unshift(JSON.parse(JSON.stringify(def)));
@@ -4578,7 +4883,7 @@
           '<button class="btn btn-danger btn-sm" onclick="tempStatsBuffer.splice('+i+',1);renderStatsConfigList()">删除</button>' +
           '</div>' +
           '<div style="display:flex;gap:6px;align-items:center;">' +
-          '<input placeholder="标签名称，如 总金额" value="' + escapeAttr(s.label || '') + '" style="flex:1;padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;" oninput="tempStatsBuffer['+i+'].label=this.value">' +
+          '<input placeholder="标签名称，如 总金额" value="' + escapeJs(s.label || '') + '" style="flex:1;padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;" oninput="tempStatsBuffer['+i+'].label=this.value">' +
           '</div>' +
           (s.type === 'sum' || s.type === 'avg' ?
             '<div style="margin-top:6px;display:flex;gap:6px;align-items:center;">' +
@@ -4595,7 +4900,7 @@
                 '<option value="">-- 请选择 --</option>' +
                 selField.options.map(o => '<option value="' + escapeAttr(o.value) + '"' + (String(s.filterValue) === String(o.value) ? ' selected' : '') + '>' + escapeHtml(o.label) + '</option>').join('') +
               '</select>' :
-              '<input placeholder="如 pending" value="' + escapeAttr(s.filterValue || '') + '" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:120px;" oninput="tempStatsBuffer['+i+'].filterValue=this.value">') +
+              '<input placeholder="如 pending" value="' + escapeJs(s.filterValue || '') + '" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:120px;" oninput="tempStatsBuffer['+i+'].filterValue=this.value">') +
             '</div>' : '') +
           '</div>';
       });
@@ -4631,7 +4936,7 @@
     function syncToGist() {
       const token = document.getElementById('ghToken').value.trim();
       let gistId = document.getElementById('ghGistId').value.trim();
-      if (!token) { alert('请先填入 GitHub Token'); return; }
+      if (!token) { showToast('⚠️ 请先填入 GitHub Token'); return; }
       setSyncStatus('正在上传...', true);
       const payload = {
         fieldsConfig: fieldsConfig,
@@ -4691,9 +4996,9 @@
     function syncFromGist() {
       const token = document.getElementById('ghToken').value.trim();
       let gistId = document.getElementById('ghGistId').value.trim();
-      if (!token) { alert('请先填入 GitHub Token'); return; }
+      if (!token) { showToast('⚠️ 请先填入 GitHub Token'); return; }
       if (!gistId && syncGistId) gistId = syncGistId;
-      if (!gistId) { alert('请先填入 Gist ID，或先在本设备执行一次"同步到云端"'); return; }
+      if (!gistId) { showToast('⚠️ 请先填入 Gist ID，或先在本设备执行一次"同步到云端"'); return; }
       setSyncStatus('正在下载...', true);
       fetch('https://api.github.com/gists/' + gistId, {
         method: 'GET',
@@ -4742,9 +5047,12 @@
     }
 
     function importLocalData(event) {
-      const file = event.target.files[0];
+      const inputEl = event.target;
+      const file = inputEl.files && inputEl.files[0];
       if (!file) return;
+      // 先把文件对象拿到手、再清空选择框（否则可能在读取完成前把文件"抽走"）
       const reader = new FileReader();
+      inputEl.value = '';
       reader.onload = function(e) {
         try {
           const data = JSON.parse(e.target.result);
@@ -4752,43 +5060,49 @@
             showToast('❌ 文件格式不正确，缺少订单数据');
             return;
           }
-          // 确认导入
-          if (!confirm('即将导入 ' + data.orders.length + ' 条订单，当前数据将被覆盖。\n\n确定继续？')) {
-            event.target.value = '';
-            return;
-          }
-          // 导入前备份当前数据
+          // 覆盖前先备份当前数据
           const beforeSnapshot = getCurrentSnapshot();
           addBackup('overwritten', beforeSnapshot, '导入前备份 ' + new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }));
-          // 恢复数据
-          if (data.fieldsConfig && data.fieldsConfig.length) fieldsConfig = mergeFieldsFromStorage(data.fieldsConfig);
-          if (data.fieldDefaults) fieldDefaults = data.fieldDefaults;
-          if (data.fieldHistory) fieldHistory = data.fieldHistory;
-          if (Array.isArray(data.orders)) orders = data.orders;
-          if (Array.isArray(data.products)) products = data.products;
-          if (data.statsConfig && Array.isArray(data.statsConfig)) statsConfig = data.statsConfig;
-          saveData('导入本地数据');
-          render();
-          showToast('✅ 导入成功！共 ' + data.orders.length + ' 条订单。旧数据已保存到"被覆盖备份"');
+          // 页内确认（不再用浏览器原生 confirm）
+          askConfirm({
+            title: '导入本地数据',
+            message: '即将导入 ' + data.orders.length + ' 条订单，当前数据将被覆盖。',
+            extra: '当前数据会先自动存一份到「历史备份 → 被覆盖备份」，可以回退。',
+            okText: '确认导入',
+            danger: true,
+            onOk: function() {
+              restoreBackupFromObject(data);
+              saveData('导入本地数据');
+              render();
+              showToast('✅ 导入成功！共 ' + data.orders.length + ' 条订单。旧数据已保存到"被覆盖备份"');
+            }
+          });
         } catch (err) {
           console.error(err);
           showToast('❌ 文件解析失败，请确认选择的是 JSON 备份文件');
         }
       };
       reader.readAsText(file);
-      event.target.value = '';
     }
 
     // ============ 回车保存行内编辑 ============
     document.addEventListener('keydown', function(ev) {
       // Ctrl+Z / Ctrl+Y（mac: Cmd+Z / Cmd+Shift+Z）
       const mod = ev.ctrlKey || ev.metaKey;
+      // 正在输入框/文本域里打字时，把撤销交给浏览器（撤销这一格的字），
+      // 否则会误撤销掉整个订单操作，很懵。
+      const t = ev.target;
+      const inEditable = !!(t && (
+        t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable
+      ));
       if (mod && (ev.key === 'z' || ev.key === 'Z')) {
+        if (inEditable) return;                 // 交给浏览器做"撤销输入"
         if (ev.shiftKey) { redoAction(); } else { undoAction(); }
         ev.preventDefault();
         return;
       }
       if (mod && (ev.key === 'y' || ev.key === 'Y')) {
+        if (inEditable) return;
         redoAction();
         ev.preventDefault();
         return;
@@ -4871,7 +5185,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.09.13-5'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.09.13-6'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
@@ -4961,30 +5275,41 @@
         }
       } catch(e) {}
     }
+    // 应用新版本（刷新页面）
+    function applyNewVersion() {
+      const sw = pendingSW;
+      pendingSW = null;
+      try {
+        if (sw) sw.postMessage({ action: 'skipWaiting' });
+      } catch (e) {}
+      location.reload();
+    }
+    function askApplyUpdate() {
+      askConfirm({
+        title: '发现新版本',
+        message: '是否立即刷新，使用新版本？',
+        extra: '你的订单数据存在本机浏览器里，刷新不受影响。',
+        okText: '立即更新',
+        onOk: applyNewVersion
+      });
+    }
     function checkForUpdates() {
       if (!canUseSW || !('serviceWorker' in navigator)) {
-        alert('当前是本地文件模式(file://)，无法自动检查更新。\n请使用本地打开新的 index.html 文件即可更新。\n建议部署到 GitHub Pages 后可自动更新。');
+        showToast('ℹ️ 本地文件模式（file://）无法自动检查更新，请打开线上网址使用');
         return;
       }
       if (pendingSW) {
-        if (confirm('发现新版本！是否立即刷新使用新版本？\n（你的订单数据不受影响）')) {
-          try { pendingSW.postMessage({ action: 'skipWaiting' }); pendingSW = null; location.reload(); } catch(e){ location.reload(); }
-        }
+        askApplyUpdate();
         return;
       }
       navigator.serviceWorker.getRegistration().then(reg => {
-        if (!reg) { alert('缓存未注册，刷新页面后再试'); return; }
+        if (!reg) { showToast('⚠️ 缓存未注册，请刷新页面后再试'); return; }
         reg.update().then(() => {
           setTimeout(() => {
-            if (pendingSW) {
-              if (confirm('发现新版本！是否立即刷新使用新版本？')) {
-                try { pendingSW.postMessage({ action: 'skipWaiting' }); pendingSW = null; location.reload(); } catch(e){ location.reload(); }
-              }
-            } else {
-              alert('当前已是最新版本 (v' + APP_VERSION + ')');
-            }
+            if (pendingSW) askApplyUpdate();
+            else showToast('✅ 当前已是最新版本 (v' + APP_VERSION + ')');
           }, 2500);
-        }).catch(() => { alert('检查更新失败，请检查网络'); });
+        }).catch(() => { showToast('❌ 检查更新失败，请检查网络'); });
       });
     }
 </script>
