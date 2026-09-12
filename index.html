@@ -293,7 +293,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-13</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-14</button>
      <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
      <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
@@ -2476,7 +2476,168 @@
       bumpStatsGen();
     }
 
+    // ==================== 统一存储层（旧柜子 localStorage + 新柜子 IndexedDB） ====================
+    // 背景：浏览器给每个域名只分约 5~10MB（localStorage），而且【同域名下所有网页共用】。
+    // 用户在同一域名下还有一个「价格打码水印工具」，它占了约 9MB，把订单系统挤到存不进去。
+    // 解决：订单数据改存 IndexedDB（容量按几百 MB 计，且与 localStorage 各自独立、互不挤占）。
+    //
+    // 过渡策略（保证不丢数据）：
+    //   1) 两个柜子都写（双写）
+    //   2) 读的时候优先读新柜子；新柜子空则读旧柜子
+    //   3) 旧柜子的数据【不删除】，留作后路
+    const IDB_NAME = 'om_main_db';
+    const IDB_STORE = 'main';
+    const IDB_KEY = 'payload';
+    const MIGRATED_KEY = 'om_migratedToIDB';
+    let _idb = null;
+    let _idbAvailable = null;   // null=未探测, true/false
+    let _storageMode = 'local'; // 'local' | 'idb'
+
+    function openMainDB() {
+      if (_idb) return Promise.resolve(_idb);
+      return new Promise(function (resolve) {
+        if (!window.indexedDB) { _idbAvailable = false; resolve(null); return; }
+        let req;
+        try { req = indexedDB.open(IDB_NAME, 1); } catch (e) { _idbAvailable = false; resolve(null); return; }
+        req.onupgradeneeded = function (e) {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+        };
+        req.onsuccess = function () { _idb = req.result; _idbAvailable = true; resolve(_idb); };
+        req.onerror = function () { _idbAvailable = false; resolve(null); };
+        // 某些浏览器（无痕模式等）会卡住不回调，加个超时兜底，避免启动被卡死
+        setTimeout(function () { if (!_idb) { _idbAvailable = false; resolve(null); } }, 3000);
+      });
+    }
+    // 读新柜子
+    // 同样要深拷贝：保证每次读回来的都是独立副本，不受内存里后续改动影响
+    function idbRead() {
+      return openMainDB().then(function (db) {
+        if (!db) return null;
+        return new Promise(function (resolve) {
+          try {
+            const tx = db.transaction(IDB_STORE, 'readonly');
+            const rq = tx.objectStore(IDB_STORE).get(IDB_KEY);
+            rq.onsuccess = function () {
+              const v = rq.result || null;
+              if (!v) { resolve(null); return; }
+              try { resolve(JSON.parse(JSON.stringify(v))); } catch (e) { resolve(v); }
+            };
+            rq.onerror = function () { resolve(null); };
+          } catch (e) { resolve(null); }
+        });
+      }).catch(function () { return null; });
+    }
+    // 写新柜子
+    // 重要：必须先做深拷贝再存。否则存进去的数组/对象和内存里的是同一个引用，
+    // 之后代码里对 orders 做清空或替换，会把"已经存好的数据"一起改掉（曾导致读回来变成 0 条）。
+    function idbWrite(payload) {
+      let snapshot;
+      try {
+        snapshot = JSON.parse(JSON.stringify(payload));
+      } catch (e) {
+        snapshot = payload;   // 极端情况（含不可序列化内容）退回原对象，至少不会崩
+      }
+      return openMainDB().then(function (db) {
+        if (!db) return false;
+        return new Promise(function (resolve) {
+          try {
+            const tx = db.transaction(IDB_STORE, 'readwrite');
+            tx.objectStore(IDB_STORE).put(snapshot, IDB_KEY);
+            tx.oncomplete = function () { resolve(true); };
+            tx.onerror = function () { resolve(false); };
+            tx.onabort = function () { resolve(false); };
+          } catch (e) { resolve(false); }
+        });
+      }).catch(function () { return false; });
+    }
+    // 读旧柜子
+    function localRead() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        return raw ? JSON.parse(raw) : null;
+      } catch (e) { return null; }
+    }
+
+    // 把一份 payload 套进全局状态（loadData 与"从新柜子读"共用）
+    function applyPayload(data) {
+      if (!data || typeof data !== 'object') return;
+      if (data.fieldsConfig && data.fieldsConfig.length > 0) {
+        fieldsConfig = mergeFieldsFromStorage(data.fieldsConfig);
+      }
+      if (data.fieldDefaults && typeof data.fieldDefaults === 'object') fieldDefaults = data.fieldDefaults;
+      if (data.fieldHistory && typeof data.fieldHistory === 'object') fieldHistory = data.fieldHistory;
+      orders = Array.isArray(data.orders) ? data.orders : [];
+      products = Array.isArray(data.products) ? data.products : [];
+      syncToken = data.syncToken || '';
+      syncGistId = data.syncGistId || '';
+      if (data.statsConfig && Array.isArray(data.statsConfig)) statsConfig = data.statsConfig;
+    }
+    // 从旧版本（v1/v2）迁移
+    function migrateOldVersions() {
+      for (const oldKey of ['orderManager_v2', 'orderManager_v1', 'orderManager']) {
+        const r = localStorage.getItem(oldKey);
+        if (r) {
+          try {
+            const d = JSON.parse(r);
+            if (Array.isArray(d.orders)) orders = d.orders;
+            if (Array.isArray(d.products)) products = d.products;
+          } catch (e) {}
+        }
+      }
+    }
+
+    // 启动时统一取数：新柜子 → 旧柜子，并在需要时执行搬家
+    async function loadDataFromBestSource() {
+      const fromIDB = await idbRead();
+      if (fromIDB && Array.isArray(fromIDB.orders)) {
+        _storageMode = 'idb';
+        applyPayload(fromIDB);
+        return { source: 'idb', orders: orders.length };
+      }
+      // 新柜子还没有数据 → 读旧柜子
+      const fromLocal = localRead();
+      if (fromLocal) {
+        _storageMode = 'local';
+        applyPayload(fromLocal);
+      } else {
+        migrateOldVersions();
+        return { source: 'empty', orders: orders.length };
+      }
+      // 旧柜子有数据但还没搬过 → 搬到新柜子（搬完校验，失败就继续用旧的）
+      const localCount = orders.length;
+      const ok = await migrateToIDB(localCount);
+      if (ok) {
+        _storageMode = 'idb';
+        return { source: 'migrated', orders: localCount };
+      }
+      return { source: 'local', orders: localCount };
+    }
+
+    // 执行搬家：写入新柜子 → 读回来校验 → 一致才算成功
+    async function migrateToIDB(expectedCount) {
+      const payload = {
+        fieldsConfig: fieldsConfig, fieldDefaults: fieldDefaults, fieldHistory: fieldHistory,
+        products: products, orders: orders, statsConfig: statsConfig,
+        syncToken: syncToken, syncGistId: syncGistId,
+        savedAt: new Date().toISOString()
+      };
+      const wrote = await idbWrite(payload);
+      if (!wrote) return false;
+      // 立刻读回来校验：订单条数必须一致
+      const back = await idbRead();
+      const backCount = (back && Array.isArray(back.orders)) ? back.orders.length : -1;
+      if (backCount !== expectedCount) {
+        console.warn('搬家校验失败：期望 ' + expectedCount + ' 条，新柜子里是 ' + backCount + ' 条');
+        return false;
+      }
+      // 校验通过，记下"已搬家"（旧柜子数据保留不删）
+      setSetting(MIGRATED_KEY, '1');
+      return true;
+    }
+
     // ============ 加载 / 保存数据 ============
+    // 旧的同步版加载（已被 loadDataFromBestSource 取代，保留仅为兼容）
     function loadData() {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
@@ -2516,8 +2677,7 @@
       lastHistorySnapshot = getCurrentSnapshot();
     }
 
-    function mergeFieldsFromStorage(saved) {
-      const result = JSON.parse(JSON.stringify(saved));
+    function mergeFieldsFromStorage(saved) {      const result = JSON.parse(JSON.stringify(saved));
       CORE_FIELDS.forEach(key => {
         if (!result.find(f => f.key === key)) {
           const def = DEFAULT_FIELDS.find(f => f.key === key);
@@ -2535,6 +2695,7 @@
         redoStack.length = 0; // 任何新操作都清空 redo 栈
         updateUndoRedoButtons();
       }
+      const savedAt = new Date().toISOString();
       const payload = {
         fieldsConfig: fieldsConfig,
         fieldDefaults: fieldDefaults,
@@ -2544,11 +2705,28 @@
         syncToken: syncToken,
         syncGistId: syncGistId,
         statsConfig: statsConfig,
-        savedAt: new Date().toISOString()
+        savedAt: savedAt
       };
-      // 存进浏览器。这里必须能"存不进去"的情况：空间满了会抛异常，
-      // 如果不管它，界面看起来一切正常但改动全都没保存（最阴险的故障）。
-      safeSetItem(STORAGE_KEY, JSON.stringify(payload));
+      // ① 写新柜子（IndexedDB）：容量大、不跟同域名的其他应用抢空间 → 这是主存储
+      idbWrite(payload).then(function (ok) {
+        if (!ok && _storageMode === 'idb') {
+          // 新柜子突然写不进去（极少见：比如用户禁用了本地存储）→ 必须告警
+          showStorageAlert('⚠️ 数据保存失败（新的存储空间写不进去）。请立刻导出备份。');
+        }
+      });
+      // ② 写旧柜子（localStorage）：作为过渡期的"双保险"。
+      //    搬家完成后这个柜子可能被同域名其他应用占满，写失败【不再算错误】，
+      //    因为新柜子已经存好了 —— 这样才真正解决"存不进去"的问题。
+      if (_storageMode === 'local') {
+        safeSetItem(STORAGE_KEY, JSON.stringify(payload));   // 还没搬家：旧柜子是主存储，失败要告警
+      } else {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+          _storageFailed = false;
+        } catch (e) {
+          _storageFailed = false;   // 已搬到新柜子，旧柜子写不下不算失败（但页面已不依赖它）
+        }
+      }
       // 数据变了：清掉渲染缓存，保证统计栏/列表拿到的是新数据
       invalidateRenderCaches();
       // 记录操作历史到 IndexedDB
@@ -2558,6 +2736,7 @@
       // 顺手更新"有未同步改动"的标记（供自动同步判断）
       _hasUnsavedChanges = true;
       noteLocalChange();
+      return !_storageFailed;
     }
 
     // ==================== 存储空间保护（低风险但很重要） ====================
@@ -6447,51 +6626,110 @@
     }
 
     // ============ 启动 ============
-    loadData();
-    loadDailyCounters();
-    loadCollapsedDefaults();
-    loadViewSettings();
-    loadSortState();
-    loadOcrRules();
-    document.body.setAttribute('data-mview', mobileViewMode);
-    updateViewSwitchButtons();
-    // 回填同步弹窗
-    document.getElementById('ghToken').value = syncToken || '';
-    document.getElementById('ghGistId').value = syncGistId || '';
-    render();
-    bindListScroll();  // 长列表滚动加载（只绑一次）
-    updateUndoRedoButtons(); // 初始按钮状态（两个都是禁用）
-    // 初始化 IndexedDB 备份系统并启动自动备份调度
-    initBackupDB().then(db => {
-      if (db) {
-        scheduleAutoBackup();
-        // 启动后立即做一次短期备份检查（若距上次不足 19 分钟会被跳过，首次启动会备份一次）
-        tryDoShortBackup();
-      }
-    });
+    // 新增：先做"数据搬家"（旧柜子 localStorage → 新柜子 IndexedDB），再开机。
+    // 为什么要搬：同一个域名下所有网页共用 localStorage，用户另一个工具
+    // （价格打码水印工具）占了约 9MB，把订单系统挤到存不进去。
+    // IndexedDB 与 localStorage 各自独立、容量按几百 MB 计，就不再互相影响。
+    function askStorageUpgrade(info) {
+      return new Promise(function (resolve) {
+        const mask = document.getElementById('confirmModal');
+        if (!mask) { resolve(true); return; }   // 弹窗不可用时直接搬（搬家本身是安全操作）
+        document.getElementById('confirmTitle').innerText = '📦 数据升级（只做一次）';
+        let h = '<div style="font-size:14px;color:#333;line-height:1.8;">';
+        h += '检测到你的数据还要做一次<b>存储升级</b>，把订单搬到更宽敞的地方。';
+        h += '<div style="margin-top:10px;padding:10px;background:#f6f8fa;border-radius:6px;font-size:13px;">';
+        h += '订单：<b>' + info.orders + '</b> 条　字段：<b>' + (info.fields || 0) + '</b> 个';
+        if (info.bytes) h += '<br>数据大小：约 <b>' + (info.bytes / 1024 / 1024).toFixed(2) + ' MB</b>';
+        h += '</div>';
+        h += '<div style="margin-top:10px;padding:10px;background:#f6ffed;border:1px solid #b7eb8f;border-radius:6px;font-size:13px;color:#237804;">';
+        h += '✅ 搬完会<b>立刻核对条数</b>，对不上就自动作废、继续用旧数据<br>';
+        h += '✅ <b>旧数据不删除</b>，以后要是想退回去随时可以<br>';
+        h += '✅ 全程在你手机里完成，<b>不联网、不上传</b>';
+        h += '</div>';
+        h += '<div style="margin-top:10px;font-size:13px;color:#a8071a;">';
+        h += '为什么必须做：现在这个存储空间和你另一个工具（价格打码）共用，它占满了，导致你在这个系统里的改动<b>存不进去</b>。';
+        h += '</div>';
+        h += '</div>';
+        document.getElementById('confirmBody').innerHTML = h;
+        const okBtn = document.getElementById('confirmOkBtn');
+        okBtn.innerText = '立即升级';
+        okBtn.className = 'btn btn-primary';
+        confirmOnOk = function () { resolve(true); };
+        mask.classList.add('show');
+        // 用户点"取消/×"也算完成（不搬，继续用旧柜子）
+        const obs = function () { if (!mask.classList.contains('show')) { resolve(false); obs_stop(); } };
+        const timer = setInterval(obs, 400);
+        function obs_stop() { clearInterval(timer); }
+      });
+    }
 
-    // ============ 自动备份调度（本地 IndexedDB 之外的"第二份副本"） ============
-    // 1) 启动后静默把本地数据同步到 Gist（只上传，不会用云端覆盖本地，所以不可能弄丢订单）
-    // 2) 每周自动导出一次 JSON 到用户选定的文件夹，只保留最近 5 份
-    // 3) 超过 3 天没备份就在顶部显示黄条提醒
-    _hasUnsavedChanges = getSetting('om_localDirty', '') === '1';
-    setTimeout(function () {
+    async function bootstrap() {
+      // ① 取数据（新柜子优先；只有旧柜子时才可能触发搬家）
+      const fromIDB = await idbRead();
+      if (fromIDB && Array.isArray(fromIDB.orders)) {
+        _storageMode = 'idb';
+        applyPayload(fromIDB);
+      } else {
+        const fromLocal = localRead();
+        if (fromLocal) {
+          applyPayload(fromLocal);
+          // 旧柜子有数据 → 征得用户同意后搬到新柜子
+          const bytes = (function () { try { return (localStorage.getItem(STORAGE_KEY) || '').length; } catch (e) { return 0; } })();
+          const agreed = await askStorageUpgrade({ orders: orders.length, fields: fieldsConfig.length, bytes: bytes });
+          if (agreed) {
+            const ok = await migrateToIDB(orders.length);
+            _storageMode = ok ? 'idb' : 'local';
+            if (ok) showToast('📦 数据升级完成，已搬到更宽敞的存储空间');
+            else showToast('⚠️ 升级未成功，继续使用原来的存储（数据没有丢）');
+          } else {
+            _storageMode = 'local';
+          }
+        } else {
+          migrateOldVersions();
+          _storageMode = 'idb';   // 全新用户：直接就用新柜子
+        }
+      }
+
+      // ② 其余启动项（顺序与改造前一致）
+      loadDailyCounters();
+      loadCollapsedDefaults();
+      loadViewSettings();
+      loadSortState();
+      loadOcrRules();
+      document.body.setAttribute('data-mview', mobileViewMode);
+      updateViewSwitchButtons();
+      document.getElementById('ghToken').value = syncToken || '';
+      document.getElementById('ghGistId').value = syncGistId || '';
+      // 加载完成后记录初始快照作为撤销基线
+      lastHistorySnapshot = getCurrentSnapshot();
+      render();
+      bindListScroll();
+      updateUndoRedoButtons();
+      initBackupDB().then(db => {
+        if (db) {
+          scheduleAutoBackup();
+          tryDoShortBackup();
+        }
+      });
+      // ③ 自动备份调度
+      _hasUnsavedChanges = getSetting('om_localDirty', '') === '1';
+      setTimeout(function () {
+        refreshBackupBanner();
+        autoSyncToCloud('auto');
+        maybeWeeklyExport();
+      }, 4000);
+      document.addEventListener('visibilitychange', function () {
+        if (document.hidden && autosyncOn()) autoSyncToCloud('auto');
+      });
+      window.addEventListener('pagehide', function () {
+        if (autosyncOn()) autoSyncToCloud('auto');
+      });
       refreshBackupBanner();
-      autoSyncToCloud('auto');       // 静默上传（没配同步会自己跳过）
-      maybeWeeklyExport();           // 没授权文件夹会自己跳过
-    }, 4000);                        // 等页面先渲染完，别抢启动时间
-    // 页面被隐藏/关闭前再补一次同步（手机切后台也算，这是最贴近"关闭时同步"的时机）
-    document.addEventListener('visibilitychange', function () {
-      if (document.hidden && autosyncOn()) autoSyncToCloud('auto');
-    });
-    window.addEventListener('pagehide', function () {
-      if (autosyncOn()) autoSyncToCloud('auto');
-    });
-    // 启动时如果发现很久没备份，立刻把黄条显示出来（上面 setTimeout 里也会再刷新一次）
-    refreshBackupBanner();
+    }
+    bootstrap();
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.09.13-13'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.09.13-14'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
