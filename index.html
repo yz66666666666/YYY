@@ -293,7 +293,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-8</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-9</button>
      <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
      <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
@@ -1369,6 +1369,8 @@
       const idSet = {};
       orders.forEach(o => { idSet[o.id] = true; });
       Array.from(selectedOrders).forEach(id => { if (!idSet[id]) selectedOrders.delete(id); });
+      // 订单/字段/统计配置都换了 → 统计栏必须从头算一遍
+      markStatsDirty();
       return true;
     }
 
@@ -2020,34 +2022,40 @@
       }
     }
 
-    // 数据变了：安排一次"后台空闲重算"。
-    // 关键点（用户明确要求）：算的时候不挡住操作 —— 先显示旧数字 + 转圈提示，算完自动替换。
-    function scheduleStatsCompute() {
-      if (!_statsValuesCache) {
-        // 第一次必须先算出来（没有旧值可显示）
-        setStatsLoading(true);
-        _statsValuesCache = computeStatsValues(orders);
-        _statsDataGen = _statsDataGenNow;
+    // 需要"从头算"时才会排队（正常编辑走 statEditCommit 增量，不进这里）
+    function scheduleStatsCompute(force) {
+      // 累加器项数和统计配置对不上（改过统计配置）→ 必须从头算
+      const mismatched = !_statsAcc || _statsAcc.length !== statsConfig.length;
+      const needFull = force || _statsNeedFullRebuild || !_statsValuesCache || mismatched;
+      if (!needFull) {
+        // 累加器是最新的，直接画（O(统计项数)）
+        if (_statsValuesCache) paintStats();
+        return;
+      }
+      // 项数对不上时，之前排的队已作废，直接同步重算一次（这种场景很少，代价可接受）
+      if (mismatched) {
+        _statsPending = false;
+        statsFullRebuild();
         paintStats();
         setStatsLoading(false);
         return;
       }
-      if (_statsDataGen === _statsDataGenNow) return;   // 已经是最新的
-      if (_statsPending) return;                        // 已经排过队了
+      if (_statsPending) return;
+      if (!_statsValuesCache) {
+        // 第一次必须先算出来（没有旧值可显示）
+        setStatsLoading(true);
+        statsFullRebuild();
+        paintStats();
+        setStatsLoading(false);
+        return;
+      }
       _statsPending = true;
       setStatsLoading(true);
       const run = function () {
         _statsPending = false;
-        const gen = _statsDataGenNow;
-        _statsValuesCache = computeStatsValues(orders);
-        _statsDataGen = gen;
+        statsFullRebuild();
         paintStats();
-        // 期间数据又变了 → 转圈继续显示，再排一次
-        if (_statsDataGen !== _statsDataGenNow) {
-          scheduleStatsCompute();
-        } else {
-          setStatsLoading(false);
-        }
+        setStatsLoading(false);
       };
       if (typeof requestIdleCallback === 'function') {
         // 浏览器空闲时才算（最多等 300ms 也会算，保证数字最终是准的）
@@ -2063,8 +2071,239 @@
       if (statsConfig.length === 0) { bar.innerHTML = ''; return; }
       // 同步部分：只把"已有结果"画出来（几乎不耗时）
       paintStats();
-      // 异步部分：数据变了就在后台重算
+      // 异步部分：只有在"需要从头算"的情况下才会排队（正常编辑走增量更新，不排队）
       scheduleStatsCompute();
+    }
+
+    // ==================== 增量统计引擎（O(1)） ====================
+    // 思路（用户提出的算法）：不改数据的时候不重算，
+    // 只在"某一条订单发生改动"时，把它的影响量加回累加器里：
+    //     总售价 100 → 某单价格 1 改成 2 → 总售价 += (2 - 1) = 101
+    // 所以每次编辑的代价是常数级，订单涨到几万条也一样快。
+    //
+    // 难点：公式字段（如"利润 = 售价 - 成本"）的数值不存在订单里，得现算。
+    // 解法：给每条订单维护一份"公式结果备忘"（_orderFormulaMemo），
+    //       改完某个字段后只重算"引用了该字段的公式"，就能拿到新的利润值。
+    let _statsAcc = null;             // 累加器：只存累加结果，不存明细
+    let _orderFormulaMemo = null;     // Map: orderId -> { 公式字段key: 当前算出来的值 }
+    let _memoOrderRef = null;         // memo 里存的是哪个订单对象（变了就重建）
+    let _statsNeedFullRebuild = true; // 需要从头算（启动/导入/恢复/改字段配置时置 true）
+
+    function validNumber(v) {
+      if (v === '' || v === null || v === undefined) return null;
+      const n = Number(v);
+      return (isNaN(n) || !isFinite(n)) ? null : n;
+    }
+    // 取一条订单在某个统计项上的"贡献值"
+    function statValueOf(stat, order, memo) {
+      if (!stat.field) return null;
+      const f = fieldsConfig.find(x => x.key === stat.field);
+      if (!f) return null;
+      if (f.type === 'formula') {
+        if (memo) {
+          const r = memo[f.key];
+          if (r === '' || r === null || r === undefined) return null;
+          return validNumber(r);
+        }
+        const r = evalFormula(f, order);
+        return (r === '' || r === null || r === undefined) ? null : validNumber(r);
+      }
+      return validNumber(order[stat.field]);
+    }
+    function statBucketOf(stat, order) {
+      if (!stat.field) return null;
+      const raw = order[stat.field];
+      return (raw === undefined || raw === null || raw === '') ? '\u0000EMPTY' : String(raw);
+    }
+    // 算一条订单对某个统计项的"增量"，并写进累加器
+    function statApply(acc, stat, order, memo, sign) {
+      const v = statValueOf(stat, order, memo);
+      if (stat.type === 'count') { acc.count += sign; return; }
+      if (stat.type === 'count_filtered') {
+        if (v === null) return;                       // 字段无值的订单不计入（与原逻辑一致）
+        if (v !== validNumber(stat.filterValue)) return;
+        acc.map['\u0001'] = (acc.map['\u0001'] || 0) + sign;
+        return;
+      }
+      if (stat.type === 'sum' || stat.type === 'sum_status') {
+        if (v === null) return;
+        acc.sum += sign * v;
+        return;
+      }
+      if (stat.type === 'avg') {
+        if (v === null) return;
+        acc.sum += sign * v;
+        acc.cnt += sign;
+        return;
+      }
+    }
+    // 分组类统计（预留）：按字段值分桶累加
+    function statApplyGrouped(acc, stat, order, memo, sign) {
+      const v = statValueOf(stat, order, memo);
+      if (v === null) return;
+      const b = statBucketOf(stat, order);
+      acc.map[b] = (acc.map[b] || 0) + sign * v;
+    }
+    function statResult(acc, stat) {
+      if (!acc) return 0;
+      if (stat.type === 'count') return acc.count;
+      if (stat.type === 'count_filtered') return acc.map['\u0001'] || 0;
+      if (stat.type === 'sum' || stat.type === 'sum_status') return Math.round(acc.sum * 100) / 100;
+      if (stat.type === 'avg') return acc.cnt > 0 ? Math.round(acc.sum / acc.cnt * 100) / 100 : 0;
+      return 0;
+    }
+
+    // 从头算一遍（只在启动/导入/恢复/改配置时调用）
+    function statsFullRebuild() {
+      const n = statsConfig.length;
+      _statsAcc = [];
+      _orderFormulaMemo = new Map();
+      _memoOrderRef = orders;
+      const memoMap = _orderFormulaMemo;
+      const orderCount = orders.length;
+      for (let i = 0; i < n; i++) {
+        const s = statsConfig[i];
+        const acc = { count: 0, sum: 0, cnt: 0, map: {} };
+        for (let j = 0; j < orderCount; j++) {
+          statApply(acc, s, orders[j], null, 1);
+        }
+        _statsAcc.push(acc);
+      }
+      // 建"公式结果备忘"：之后改动某条订单时，可以瞬间拿到它原来的公式值
+      formulaFieldsOf().forEach(f => {
+        for (let j = 0; j < orderCount; j++) {
+          let memo = memoMap.get(orders[j].id);
+          if (!memo) { memo = {}; memoMap.set(orders[j].id, memo); }
+          const r = evalFormula(f, orders[j]);
+          memo[f.key] = (r === '' || r === null || r === undefined) ? '' : String(r);
+        }
+      });
+      _statsNeedFullRebuild = false;
+      _statsValuesCache = statsAccToValues();
+      _statsDataGen = _statsDataGenNow;
+      return _statsValuesCache;
+    }
+
+    function formulaFieldsOf() {
+      return fieldsConfig.filter(f => f.type === 'formula');
+    }
+    // 累加器 → 展示用的值数组（O(统计项数)，与订单条数无关）
+    function statsAccToValues() {
+      const out = [];
+      statsConfig.forEach((s, i) => {
+        out.push({ label: s.label, val: String(statResult(_statsAcc[i], s)), icon: s.icon || '📊', color: s.color || 'blue' });
+      });
+      return out;
+    }
+    // 重算某条订单的公式备忘（改动后调用，O(公式字段数)）
+    function refreshOrderFormulaMemo(order) {
+      if (!_orderFormulaMemo) return null;
+      if (_memoOrderRef !== orders) return null;    // 订单数组换了，需要整体重建
+      let memo = _orderFormulaMemo.get(order.id);
+      if (!memo) { memo = {}; _orderFormulaMemo.set(order.id, memo); }
+      formulaFieldsOf().forEach(f => {
+        const r = evalFormula(f, order);
+        memo[f.key] = (r === '' || r === null || r === undefined) ? '' : String(r);
+      });
+      return memo;
+    }
+
+    // 记录"改动前"的那条订单（要在修改之前调用）
+    let _statEditMemos = null;   // { before: {...}, ordersRef: [...] }
+    function statEditBegin() {
+      ensureStatsAligned();
+      if (_statsNeedFullRebuild || !_statsAcc) { _statEditMemos = null; return; }
+      _statEditMemos = { before: {}, ordersRef: orders };
+    }
+    function statEditSnapshot(order) {
+      if (!_statEditMemos || _statEditMemos.ordersRef !== orders) return null;
+      const memo = _orderFormulaMemo ? _orderFormulaMemo.get(order.id) : null;
+      const copy = Object.assign({}, order);          // 浅拷贝，值为原始类型，够用
+      _statEditMemos.before[order.id] = { order: copy, memo: memo ? Object.assign({}, memo) : null };
+      return copy;
+    }
+    // 改动前先备好"改之前的副本"（调用方不需要关心细节）
+    function statPrepareEdit(order) {
+      statEditBegin();
+      return statEditSnapshot(order);
+    }
+    // 应用已完成改动带来的增量（O(统计项数 × 改动的订单数)，与总条数无关）
+    function statEditCommit(changedOrders) {
+      if (!_statEditMemos || _statEditMemos.ordersRef !== orders || !_statsAcc) {
+        _statsNeedFullRebuild = true;
+        scheduleStatsCompute(true);
+        return;
+      }
+      const list = changedOrders || Object.keys(_statEditMemos.before).map(id => orders.find(o => o.id === id)).filter(Boolean);
+      list.forEach(o => {
+        const rec = _statEditMemos.before[o.id];
+        if (!rec) return;
+        const beforeOrder = rec.order;
+        const beforeMemo = rec.memo;
+        const afterMemo = refreshOrderFormulaMemo(o);
+        for (let i = 0; i < statsConfig.length; i++) {
+          const s = statsConfig[i];
+          const acc = _statsAcc[i];
+          // 先减掉改之前的影响，再加上改之后的影响
+          statApply(acc, s, beforeOrder, beforeMemo, -1);
+          statApply(acc, s, o, afterMemo, 1);
+        }
+      });
+      _statEditMemos = null;
+      _statsValuesCache = statsAccToValues();
+      _statsDataGen = _statsDataGenNow;
+      paintStats();
+    }
+    // 新增 / 删除订单：同样走增量（O(统计项数)）
+    function statAddOrders(list) {
+      ensureStatsAligned();
+      if (!_statsAcc || _statsNeedFullRebuild) { scheduleStatsCompute(true); return false; }
+      list.forEach(o => {
+        const memo = refreshOrderFormulaMemo(o);
+        for (let i = 0; i < statsConfig.length; i++) statApply(_statsAcc[i], statsConfig[i], o, memo, 1);
+      });
+      _statsValuesCache = statsAccToValues();
+      _statsDataGen = _statsDataGenNow;
+      paintStats();
+      return true;
+    }
+    function statRemoveOrders(list) {
+      // 先自愈：删订单时 orders 常被整体重新赋值（filter），memo/累加器跟着订单数组一起迁移，
+      // 这样删除依然能走增量，不必从头算。
+      ensureStatsAligned();
+      if (!_statsAcc || _statsNeedFullRebuild) { scheduleStatsCompute(true); return false; }
+      list.forEach(o => {
+        const memo = _orderFormulaMemo ? _orderFormulaMemo.get(o.id) : null;
+        for (let i = 0; i < statsConfig.length; i++) statApply(_statsAcc[i], statsConfig[i], o, memo, -1);
+        if (_orderFormulaMemo) _orderFormulaMemo.delete(o.id);
+      });
+      _statsValuesCache = statsAccToValues();
+      _statsDataGen = _statsDataGenNow;
+      paintStats();
+      return true;
+    }
+    // 让累加器/备忘跟当前 orders 数组对齐：
+    // 如果 orders 被整体替换过（filter / 赋值 / 导入），这里把旧备忘按 id 迁移过来。
+    function ensureStatsAligned() {
+      if (_memoOrderRef === orders) return true;
+      if (!_statsAcc || _statsAcc.length !== statsConfig.length) { _statsNeedFullRebuild = true; return false; }
+      if (!_orderFormulaMemo) { _orderFormulaMemo = new Map(); _memoOrderRef = orders; return true; }
+      const old = _orderFormulaMemo;
+      const next = new Map();
+      orders.forEach(o => {
+        const m = old.get(o.id);
+        if (m) next.set(o.id, m);
+      });
+      _orderFormulaMemo = next;
+      _memoOrderRef = orders;
+      return true;
+    }
+    // 标记"必须从头算"（导入/恢复/改字段或统计配置/同步时调用）
+    function markStatsDirty() {
+      _statsNeedFullRebuild = true;
+      // 之前排队的重算已经作废，必须清掉这个标志，否则统计会卡住不再更新
+      _statsPending = false;
+      bumpStatsGen();
     }
 
     // ============ 加载 / 保存数据 ============
@@ -2163,6 +2402,8 @@
       if (snap.products) products = snap.products;
       if (snap.orders) orders = snap.orders;
       if (snap.statsConfig) statsConfig = snap.statsConfig;
+      // 撤销/重做会整批替换数据 → 统计栏必须从头算
+      markStatsDirty();
     }
 
     function undoAction() {
@@ -3892,7 +4133,11 @@
           const merged = Object.assign({}, orders[idx], data);
           // 默认值收集（不覆盖已存在的）
           pushToDefaults(merged);
+          // 统计栏增量：先记下改之前的样子，改完只把"差值"加回累加器
+          statEditBegin();
+          statEditSnapshot(orders[idx]);
           orders[idx] = merged;
+          statEditCommit([merged]);
         }
       } else {
         // 生成不重复的订单 id（同一毫秒内连开两单也不会撞）
@@ -3909,6 +4154,7 @@
         if (!newOrder.orderNo) newOrder.orderNo = 'NO' + Date.now();
         pushToDefaults(newOrder);
         orders.unshift(newOrder);
+        statAddOrders([newOrder]);
       }
       saveData(editingId ? '编辑订单' : '新增订单');
       render();
@@ -3947,8 +4193,10 @@
     // 真正的删除动作（silent=true 时不弹确认，供内部/测试调用）
     function deleteOrderById(id, silent) {
       const doDelete = function () {
+        const removed = orders.find(o => o.id === id);
         orders = orders.filter(o => o.id !== id);
         selectedOrders.delete(id);
+        if (removed) statRemoveOrders([removed]);   // 统计栏增量：只减掉这一条
         saveData('删除订单');
         render();
       };
@@ -4581,20 +4829,23 @@
         applyBatchSync(field.key, value);
         return;
       }
+      statPrepareEdit(order);           // 先备好"改之前的副本"，供统计栏算差值
       order[field.key] = value;
       saveData('行内编辑: ' + field.label);
       afterCellEdit(order.id);
       closeInlineEditor();
     }
 
-    // 改完一个单元格后的最小刷新：只重画那一行 + 后台重算统计栏
+    // 改完一个单元格后的最小刷新：只重画那一行 + 统计栏走增量
     // （上千条订单时这是"不卡"的关键）
     function afterCellEdit(orderId) {
       // 只清公式缓存，保留过滤结果缓存（避免把上千条重新过滤+排序一遍）
       _formulaCache = null;
+      // 统计栏：把这次改动的影响量加回累加器（O(统计项数)，与订单条数无关）
+      statEditCommit();
       // saveData 已经把 _filterSigCache 清掉了，这里补算一次
       _currentList = getFilteredOrders();
-      renderStats();   // 内部只画旧值 + 角落转圈，重算放到后台空闲时做
+      paintStats();
       if (!refreshOrderRow(orderId)) {
         render();     // 该行不在当前窗口里（比如被筛选掉了），退回整体刷新
       }
@@ -4605,7 +4856,10 @@
       const field = fieldsConfig.find(f => f.key === fieldKey);
       const targets = orders.filter(o => selectedOrders.has(o.id));
       const changed = targets.filter(o => (o[fieldKey] === undefined ? '' : o[fieldKey]) !== newVal).length;
-      targets.forEach(o => { o[fieldKey] = newVal; pushToDefaults(o); });
+      // 统计栏增量：批量改动同样只记差值，不重算全部
+      statEditBegin();
+      targets.forEach(o => { statEditSnapshot(o); o[fieldKey] = newVal; pushToDefaults(o); });
+      statEditCommit(targets);
       saveData('批量修改 ' + (field ? field.label : fieldKey) + '（' + changed + ' 个订单）');
       render();
       closeInlineEditor();
@@ -4650,12 +4904,13 @@
         }
       }
 
-      order[field.key] = newVal;
       // 批量模式下同步到所有选中订单
       if (batchSyncMode) {
         applyBatchSync(field.key, newVal);
         return;
       }
+      statPrepareEdit(order);           // 先备好"改之前的副本"，供统计栏算差值
+      order[field.key] = newVal;
       pushToDefaults(order);
       saveData('行内编辑: ' + field.label);
       afterCellEdit(order.id);
@@ -5587,7 +5842,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.09.13-8'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.09.13-9'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
