@@ -279,7 +279,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-6</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-7</button>
      <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
      <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
@@ -291,7 +291,7 @@
 <div class="stats-bar" id="statsBar"></div>
 
 <div class="toolbar">
-  <input id="searchInput" placeholder="🔍 搜索订单号 / 内容 / 客户 / 地址..." oninput="render()">
+  <input id="searchInput" placeholder="🔍 搜索订单号 / 内容 / 客户 / 地址..." oninput="onSearchInput()">
   <select id="statusFilter" onchange="render()">
     <option value="">全部状态</option>
   </select>
@@ -2165,6 +2165,8 @@
     }
 
     function render(forceFull) {
+      const _t0 = PERF_ON ? performance.now() : 0;
+      let _t1 = _t0;
       // 每次新渲染：清空一次性的缓存
       _renderListCache = null;
       _formulaCache = null;
@@ -2172,20 +2174,101 @@
 
       // 统计栏基于全部订单，内部有签名缓存，没变化时不会重建 DOM
       renderStats();
+      if (PERF_ON) { _t1 = performance.now(); perfMark('①统计栏', _t1 - _t0); }
       renderStatusFilter();
       updateSearchFieldSel();
       renderTableHead();
-      // 只渲染当前正在看的那个视图，另外两个跳过（省下 2/3 的 DOM 构建）
-      if (mobileViewMode === 'table') {
-        renderTbody();
-      } else if (mobileViewMode === 'card') {
-        renderCards();
-      } else {
-        renderCompactList();
+      if (PERF_ON) { const t = performance.now(); perfMark('②工具栏', t - _t1); _t1 = t; }
+
+      // 虚拟滚动：DOM 里只保留当前窗口的那些行
+      _currentList = getFilteredOrders();
+      const sig = listSignature();
+      const condChanged = (sig !== _listSig);
+      _listSig = sig;
+
+      if (_currentList.length === 0) {
+        // 空列表：各视图自己的"暂无订单"提示
+        if (mobileViewMode === 'table') renderTbody();
+        else if (mobileViewMode === 'card') renderCards();
+        else renderCompactList();
+        _winStart = 0; _winCount = 0;
+      } else if (condChanged) {
+        // 筛选条件/视图/数据条数变了 → 从头开始一个新窗口
+        _winStart = 0;
+        renderWindow(0, windowSize(), null);
+      } else {        // 条件没变（例如只是改了某一格、拖了一下顺序）→ DOM 保持原样，不重画
+        _winStart = Math.min(_winStart, Math.max(0, _currentList.length - 1));
       }
+      if (PERF_ON) { const t = performance.now(); perfMark('③列表', t - _t1); _t1 = t; }
       renderCompactHead();
       initManualOrderDrag();
       updateBatchBar();
+      if (PERF_ON) {
+        const t = performance.now();
+        perfMark('④收尾', t - _t1);
+        perfMark('★总计', t - _t0);
+        perfRenderPanel();
+      }
+    }
+
+    // ============ 性能诊断面板（只在网址带 ?perf=1 时启用，平时完全不影响） ============
+    const PERF_ON = /[?&]perf=1/.test(location.search || '');
+    let _perfLast = 0;
+    let _perfStats = {};
+    function perfMark(name, dt) {
+      if (!PERF_ON) return;
+      const s = _perfStats[name] || (_perfStats[name] = { n: 0, total: 0, max: 0 });
+      s.n++; s.total += dt; if (dt > s.max) s.max = dt;
+    }
+    function perfRenderPanel() {
+      if (!PERF_ON) return;
+      const now = performance.now();
+      const gap = _perfLast ? (now - _perfLast) : 0;
+      _perfLast = now;
+      const rows = Object.keys(_perfStats).map(k => {
+        const s = _perfStats[k];
+        return k + '：' + Math.round(s.total / s.n) + 'ms均 / ' + Math.round(s.max) + 'ms峰 / ' + s.n + '次';
+      });
+      rows.push('距上次渲染间隔：' + Math.round(gap) + 'ms');
+      rows.push('订单 ' + orders.length + ' 条，视图 ' + mobileViewMode);
+      let el = document.getElementById('perfPanel');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'perfPanel';
+        el.style.cssText = 'position:fixed;left:6px;bottom:6px;z-index:9999;background:rgba(0,0,0,0.82);color:#0f0;font-size:11px;line-height:1.5;padding:8px 10px;border-radius:6px;max-width:94vw;white-space:pre-wrap;font-family:monospace;';
+        el.onclick = function () { _perfStats = {}; _perfLast = 0; el.innerText = '已清空，再操作几下看看'; };
+        document.body.appendChild(el);
+      }
+      el.innerText = '📊 性能（点我清空）\n' + rows.join('\n');
+    }
+
+    // 用户操作 → 界面更新完成的实际耗时（这才是你"感觉到"的延迟）
+    if (PERF_ON) {
+      let _opStart = 0;
+      document.addEventListener('pointerdown', function () { _opStart = performance.now(); }, true);
+      ['click', 'input', 'change'].forEach(function (evName) {
+        document.addEventListener(evName, function (e) {
+          if (!_opStart) return;
+          const t = e.target || {};
+          const who = String(t.id || t.className || t.tagName || '?').slice(0, 16);
+          const dt = performance.now() - _opStart;
+          _opStart = 0;
+          setTimeout(function () {
+            perfMark('感觉耗时[' + who + ']', dt);
+            perfRenderPanel();
+          }, 0);
+        }, true);
+      });
+    }
+
+    // 搜索输入防抖：手机上每敲一个字都全量过滤+重排会很卡，等 150ms 没有新输入再渲染
+    let _searchTimer = null;
+    function onSearchInput() {
+      if (_searchTimer) clearTimeout(_searchTimer);
+      _searchTimer = setTimeout(function () {
+        _searchTimer = null;
+        render();
+      }, 150);
     }
 
     function getFilteredOrders() {
@@ -2429,17 +2512,24 @@
     }
 
     // 把当前可见列表的 DOM 顺序同步回 manualOrder（保留被筛选掉的订单原有相对顺序）
+    // 把当前可见列表的 DOM 顺序同步回 manualOrder
+    // 注意：开启虚拟滚动后，DOM 里只是整张列表的"一个连续窗口"，
+    // 所以必须把窗口内的新顺序放回它原本的位置，绝不能把窗口外的订单都挤到后面去。
     function syncManualOrderFromDom() {
       const container = getOrderListContainer();
       const domOrder = orderRowNodes(container).map(el => el.getAttribute('data-id'));
+      if (domOrder.length === 0) return;
       const domSet = {};
       domOrder.forEach(id => { domSet[id] = true; });
-      let anchor = 0;
-      for (let i = 0; i < manualOrder.length; i++) {
-        if (domSet[manualOrder[i]]) { anchor = i; break; }
-      }
       const base = manualOrder.filter(id => !domSet[id]);
-      const insertAt = Math.max(0, Math.min(anchor, base.length));
+      // 找到窗口第一条在"窗口外顺序"里的位置，把整段窗口塞回那个位置
+      let insertAt = 0;
+      const firstId = domOrder[0];
+      for (let i = 0; i < manualOrder.length; i++) {
+        if (manualOrder[i] === firstId) break;
+        if (!domSet[manualOrder[i]]) insertAt++;
+      }
+      insertAt = Math.max(0, Math.min(insertAt, base.length));
       manualOrder = base.slice(0, insertAt).concat(domOrder, base.slice(insertAt));
       ensureManualOrderComplete();
     }
@@ -2546,6 +2636,243 @@
       return escapeHtml(getDisplayText(field, val));
     }
 
+    // ============ 虚拟滚动（几千上万条也不卡的关键） ============
+    // 思路：DOM 里永远只保留"看得见的那些行"，上下用两个撑高的空div占位。
+    // 这样无论总共 100 条还是 10000 条，每次渲染的工作量都恒定（约 2 屏行数）。
+    const VROW_EST = 46;             // 每行预估高度（px），真实高度会被测量后修正
+    let _winStart = 0;               // 当前窗口第一行在列表中的下标
+    let _winCount = 0;               // 当前窗口渲染了多少行
+    let _currentList = [];           // 当前过滤+排序后的完整列表（纯数据）
+    let _listSig = '';               // 列表签名：变了才需要从第一批重来
+    let _rowH = 0;                   // 实测行高（每行高度不一致时取平均）
+    let _spacerTop = null, _spacerBot = null;
+
+    function listSignature() {
+      const kwEl = document.getElementById('searchInput');
+      const sfEl = document.getElementById('statusFilter');
+      const sfdEl = document.getElementById('searchFieldSel');
+      return [
+        orders.length,
+        kwEl ? kwEl.value : '',
+        sfEl ? sfEl.value : '',
+        sfdEl ? sfdEl.value : '',
+        orderSortMode,
+        mobileViewMode,
+        fieldsConfig.length,
+      ].join('\u0001');
+    }
+
+    function windowSize() {
+      // 一个窗口 = 视口高度的 2 倍左右，最少 40 行
+      const h = window.innerHeight || 640;
+      return Math.max(40, Math.ceil((h * 2) / (_rowH || VROW_EST)) + 10);
+    }
+
+    function getActiveContainer() {
+      if (mobileViewMode === 'table') return document.getElementById('ordersTbody');
+      if (mobileViewMode === 'card') return document.getElementById('cardList');
+      return document.getElementById('compactList');
+    }
+
+    function ensureSpacers(container) {
+      if (_spacerTop && _spacerTop.parentNode === container) return;
+      _spacerTop = document.createElement('div');
+      _spacerTop.id = 'vSpacerTop';
+      _spacerTop.style.cssText = 'height:0;overflow:hidden;';
+      _spacerBot = document.createElement('div');
+      _spacerBot.id = 'vSpacerBot';
+      _spacerBot.style.cssText = 'height:0;overflow:hidden;';
+    }
+
+    // 渲染 [start, start+count) 这些行，并设置上下占位高度
+    function renderWindow(start, count, scrollToListIndex) {
+      const list = _currentList;
+      const total = list.length;
+      if (total === 0) return;
+      const container = getActiveContainer();
+      if (!container) return;
+      ensureSpacers(container);
+
+      // 顶部占位高度
+      const rowH = _rowH || VROW_EST;
+      // 浏览器对元素高度有上限（约 3300 万 px），上万条时占位高度要压缩，否则滚动条会错乱
+      const MAX_SPACER = 8000000;
+      const scale = Math.min(1, MAX_SPACER / Math.max(1, total * rowH));
+      const topH = Math.round(start * rowH * scale);
+      const botH = Math.round(Math.max(0, total - (start + count)) * rowH * scale);
+
+      const slice = list.slice(start, Math.min(start + count, total));
+      let html = '';
+      if (mobileViewMode === 'table') {
+        const fields = getVisibleFields('table');
+        slice.forEach(o => { html += buildTableRow(o, fields); });
+      } else if (mobileViewMode === 'card') {
+        const fields = getVisibleFields('card');
+        slice.forEach(o => { html += buildCardHtml(o, fields); });
+      } else {
+        const keyFields = fieldsConfig.filter(f => getCompactFieldKeys().indexOf(f.key) >= 0);
+        slice.forEach(o => { html += buildCompactRowHtml(o, keyFields); });
+      }
+
+      // 一次性替换内容（占位 + 行）
+      const tableMode = (mobileViewMode === 'table');
+      if (tableMode) {
+        // 表格：占位放在 tbody 里，用跨列的 tr
+        const colspan = getVisibleFields('table').length + 2;
+        const spTop = '<tr id="vSpacerTop" style="height:' + topH + 'px;"><td colspan="' + colspan + '" style="padding:0;border:none;"></td></tr>';
+        const spBot = '<tr id="vSpacerBot" style="height:' + botH + 'px;"><td colspan="' + colspan + '" style="padding:0;border:none;"></td></tr>';
+        container.innerHTML = spTop + html + spBot;
+      } else {
+        container.innerHTML =
+          '<div id="vSpacerTop" style="height:' + topH + 'px;overflow:hidden;"></div>' +
+          html +
+          '<div id="vSpacerBot" style="height:' + botH + 'px;overflow:hidden;"></div>';
+        if (!tableMode && mobileViewMode === 'compact') {
+          Array.prototype.forEach.call(container.querySelectorAll('.compact-row'), row => {
+            bindCompactLongPress(row, row.getAttribute('data-id'));
+          });
+        }
+      }
+
+      _winStart = start;
+      _winCount = slice.length;
+
+      // 测量真实行高，用于下次算占位高度
+      measureRowHeight(container);
+
+      if (scrollToListIndex != null) {
+        scrollToIndex(scrollToListIndex);
+      }
+    }
+
+    function measureRowHeight(container) {
+      const rows = container.querySelectorAll('[data-id]');
+      if (rows.length < 2) return;
+      // 取前几行的平均高度（比单行更稳）
+      let sum = 0, n = 0;
+      for (let i = 0; i < Math.min(rows.length, 8); i++) {
+        const h = rows[i].getBoundingClientRect().height;
+        if (h > 0) { sum += h; n++; }
+      }
+      if (n > 0) {
+        const avg = sum / n;
+        // 平滑过渡，避免抖动
+        _rowH = _rowH ? (_rowH * 0.7 + avg * 0.3) : avg;
+      }
+    }
+
+    // 让列表里的第 idx 条滚到视口顶部附近
+    function scrollToIndex(idx) {
+      const container = getActiveContainer();
+      if (!container || !_spacerTop) return;
+      const rowH = _rowH || VROW_EST;
+      const target = Math.round(idx * rowH);
+      const top = container.getBoundingClientRect().top + window.scrollY + target;
+      window.scrollTo(0, Math.max(0, top - 60));
+    }
+
+    // 滚动时判断要不要换窗口
+    let _winScrollLock = false;
+    function onListScroll() {
+      if (_winScrollLock) return;
+      const total = _currentList.length;
+      if (total <= _winCount) return;   // 全部都在 DOM 里，不用换
+      const container = getActiveContainer();
+      if (!container) return;
+      const rows = container.querySelectorAll('[data-id]');
+      if (rows.length === 0) return;
+
+      const vh = window.innerHeight;
+      const firstRect = rows[0].getBoundingClientRect();
+      const lastRect = rows[rows.length - 1].getBoundingClientRect();
+
+      // 往下滚到接近窗口底部 → 窗口后移
+      if (lastRect.bottom < vh * 1.5 && (_winStart + _winCount) < total) {
+        const size = _winCount;
+        let next = Math.min(_winStart + Math.floor(size / 2), total - size);
+        if (next <= _winStart) next = _winStart + 1;
+        _winScrollLock = true;
+        renderWindow(next, size, null);
+        requestAnimationFrame(() => { _winScrollLock = false; });
+        return;
+      }
+      // 往上滚到接近窗口顶部 → 窗口前移
+      if (firstRect.top > -vh * 0.5 && _winStart > 0) {
+        const size = _winCount;
+        let prev = Math.max(0, _winStart - Math.floor(size / 2));
+        _winScrollLock = true;
+        renderWindow(prev, size, null);
+        requestAnimationFrame(() => { _winScrollLock = false; });
+      }
+    }
+
+    let _listScrollBound = false;
+    function bindListScroll() {
+      if (_listScrollBound) return;
+      _listScrollBound = true;
+      window.addEventListener('scroll', onListScroll, { passive: true });
+    }
+
+    // ============ 单行构建器（列表渲染和"改一格只刷一行"共用） ============
+    // 改一个单元格时，不必重建整个列表——只重建那一行就够了，省掉绝大部分开销。
+    function buildTableRow(o, visibleFields) {
+      const checked = selectedOrders.has(o.id) ? 'checked' : '';
+      let html = '<tr data-id="' + escapeAttr(o.id) + '">';
+      html += '<td class="checkbox-cell"><input type="checkbox" ' + checked + ' onchange="toggleSelectOrder(\'' + escapeJs(o.id) + '\', this.checked)"></td>';
+      visibleFields.forEach(f => {
+        const cellHtml = renderCellValue(f, o);
+        const onclick = (f.type === 'formula')
+          ? 'onclick="showFormulaDetail(\'' + escapeJs(o.id) + '\', \'' + escapeJs(f.key) + '\')" title="点击查看计算过程"'
+          : 'onclick="startInlineEdit(this, \'' + escapeJs(o.id) + '\', \'' + escapeJs(f.key) + '\')"';
+        html += '<td class="clickable" ' + onclick + '>' + cellHtml + '</td>';
+      });
+      html += '<td class="actions-cell">' +
+        '<button class="btn btn-secondary btn-sm" onclick="editOrder(\'' + escapeJs(o.id) + '\')">编辑</button>' +
+        '<button class="btn btn-danger btn-sm" onclick="deleteOrder(\'' + escapeJs(o.id) + '\')">删除</button>' +
+        '</td>';
+      html += '</tr>';
+      return html;
+    }
+
+    // 把一行替换成最新内容（三个视图通用）
+    function refreshOrderRow(orderId) {
+      const o = orders.find(x => x.id === orderId);
+      if (!o) return false;
+      try {
+        if (mobileViewMode === 'table') {
+          const tr = document.querySelector('#ordersTbody tr[data-id="' + orderId + '"]');
+          if (!tr) return false;
+          const wrap = document.createElement('tbody');
+          wrap.innerHTML = buildTableRow(o, getVisibleFields('table'));
+          const fresh = wrap.firstElementChild;
+          if (!fresh) return false;
+          tr.replaceWith(fresh);
+          return true;
+        }
+        if (mobileViewMode === 'card') {
+          const card = document.querySelector('#cardList .card[data-id="' + orderId + '"]');
+          if (!card) return false;
+          const wrap = document.createElement('div');
+          wrap.innerHTML = buildCardHtml(o, getVisibleFields('card'));
+          const fresh = wrap.firstElementChild;
+          if (!fresh) return false;
+          card.replaceWith(fresh);
+          return true;
+        }
+        const row = document.querySelector('#compactList .compact-row[data-id="' + orderId + '"]');
+        if (!row) return false;
+        const wrap = document.createElement('div');
+        wrap.innerHTML = buildCompactRowHtml(o, fieldsConfig.filter(f => getCompactFieldKeys().indexOf(f.key) >= 0));
+        const fresh = wrap.firstElementChild;
+        if (!fresh) return false;
+        row.replaceWith(fresh);
+        if (typeof bindCompactLongPress === 'function') bindCompactLongPress(fresh, orderId);
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+
     function renderTbody() {
       const list = getFilteredOrders();
       const tbody = document.getElementById('ordersTbody');
@@ -2554,26 +2881,7 @@
         tbody.innerHTML = '<tr><td colspan="' + (visibleFields.length + 2) + '" style="text-align:center;padding:40px;color:#999;">暂无订单，点击右上角 + 新增订单</td></tr>';
         return;
       }
-      let html = '';
-      list.forEach(o => {
-        const checked = selectedOrders.has(o.id) ? 'checked' : '';
-        html += '<tr data-id="' + escapeAttr(o.id) + '">';
-        html += '<td class="checkbox-cell"><input type="checkbox" ' + checked + ' onchange="toggleSelectOrder(\'' + escapeJs(o.id) + '\', this.checked)"></td>';
-        visibleFields.forEach(f => {
-          const cellHtml = renderCellValue(f, o);
-          const isFormula = f.type === 'formula';
-          const onclick = isFormula
-            ? 'onclick="showFormulaDetail(\'' + escapeJs(o.id) + '\', \'' + escapeJs(f.key) + '\')" title="点击查看计算过程"'
-            : 'onclick="startInlineEdit(this, \'' + escapeJs(o.id) + '\', \'' + escapeJs(f.key) + '\')"';
-          html += '<td class="clickable" ' + onclick + '>' + cellHtml + '</td>';
-        });
-        html += '<td class="actions-cell">' +
-          '<button class="btn btn-secondary btn-sm" onclick="editOrder(\'' + escapeJs(o.id) + '\')">编辑</button>' +
-          '<button class="btn btn-danger btn-sm" onclick="deleteOrder(\'' + escapeJs(o.id) + '\')">删除</button>' +
-          '</td>';
-        html += '</tr>';
-      });
-      tbody.innerHTML = html;
+      renderWindow(_winStart, _winCount || windowSize(), null);
     }
 
     // 卡片标题：固定用订单编号（不再跟着"字段列表第一个"变，避免拖动字段顺序后标题乱跳）
@@ -2583,40 +2891,40 @@
       return v || o.id || '订单';
     }
 
+    function buildCardHtml(o, visibleFields) {
+      const checked = selectedOrders.has(o.id) ? 'checked' : '';
+      let html = '';
+      html += '<div class="card" data-id="' + escapeAttr(o.id) + '">';
+      html += '<div class="card-checkbox"><input type="checkbox" ' + checked + ' onchange="toggleSelectOrder(\'' + escapeJs(o.id) + '\', this.checked)"> 选择此订单</div>';
+      html += '<div class="card-header">';
+      html += '<div class="card-title">' + escapeHtml(cardTitleOf(o)) + '</div>';
+      html += '<div class="card-actions">';
+      html += '<button class="btn btn-secondary btn-sm" onclick="editOrder(\'' + escapeJs(o.id) + '\')">编辑</button>';
+      html += '<button class="btn btn-danger btn-sm" onclick="deleteOrder(\'' + escapeJs(o.id) + '\')">删除</button>';
+      html += '</div></div>';
+      visibleFields.forEach(f => {
+        const label = escapeHtml(f.label);
+        const valHtml = renderCellValue(f, o);
+        const onclick = (f.type === 'formula')
+          ? 'onclick="showFormulaDetail(\'' + escapeJs(o.id) + '\', \'' + escapeJs(f.key) + '\')" title="点击查看计算过程"'
+          : 'onclick="startInlineEdit(this, \'' + escapeJs(o.id) + '\', \'' + escapeJs(f.key) + '\')"';
+        html += '<div class="card-row">' +
+          '<div class="card-label">' + label + '</div>' +
+          '<div class="card-value" ' + onclick + '>' + valHtml + '</div>' +
+          '</div>';
+      });
+      html += '</div>';
+      return html;
+    }
+
     function renderCards() {
       const list = getFilteredOrders();
       const container = document.getElementById('cardList');
-      const visibleFields = getVisibleFields('card');
       if (list.length === 0) {
         container.innerHTML = '<div class="card" style="text-align:center;color:#999;padding:30px;">暂无订单，点击右上角 + 新增订单</div>';
         return;
       }
-      let html = '';
-      list.forEach(o => {
-        const checked = selectedOrders.has(o.id) ? 'checked' : '';
-        html += '<div class="card" data-id="' + escapeAttr(o.id) + '">';
-        html += '<div class="card-checkbox"><input type="checkbox" ' + checked + ' onchange="toggleSelectOrder(\'' + escapeJs(o.id) + '\', this.checked)"> 选择此订单</div>';
-        html += '<div class="card-header">';
-        html += '<div class="card-title">' + escapeHtml(cardTitleOf(o)) + '</div>';
-        html += '<div class="card-actions">';
-        html += '<button class="btn btn-secondary btn-sm" onclick="editOrder(\'' + escapeJs(o.id) + '\')">编辑</button>';
-        html += '<button class="btn btn-danger btn-sm" onclick="deleteOrder(\'' + escapeJs(o.id) + '\')">删除</button>';
-        html += '</div></div>';
-        visibleFields.forEach(f => {
-          const label = escapeHtml(f.label);
-          const valHtml = renderCellValue(f, o);
-          const isFormula = f.type === 'formula';
-          const onclick = isFormula
-            ? 'onclick="showFormulaDetail(\'' + escapeJs(o.id) + '\', \'' + escapeJs(f.key) + '\')" title="点击查看计算过程"'
-            : 'onclick="startInlineEdit(this, \'' + escapeJs(o.id) + '\', \'' + escapeJs(f.key) + '\')"';
-          html += '<div class="card-row">' +
-            '<div class="card-label">' + label + '</div>' +
-            '<div class="card-value" ' + onclick + '>' + valHtml + '</div>' +
-            '</div>';
-        });
-        html += '</div>';
-      });
-      container.innerHTML = html;
+      renderWindow(_winStart, _winCount || windowSize(), null);
     }
 
     // ============ 移动端视图切换 + 各视图字段配置 ============
@@ -2707,37 +3015,32 @@
       const keys = getModeFieldKeys(mode);
       return fieldsConfig.filter(f => keys.indexOf(f.key) >= 0);
     }
+    function buildCompactRowHtml(o, keyFields) {
+      const checked = selectedOrders.has(o.id) ? 'checked' : '';
+      let html = '';
+      html += '<div class="compact-row" data-id="' + escapeAttr(o.id) + '">';
+      html += '<label class="cr-check" title="长按进入编辑"><input type="checkbox" ' + checked + ' onchange="toggleSelectOrder(\'' + escapeJs(o.id) + '\', this.checked)"></label>';
+      html += '<div class="compact-cells">';
+      keyFields.forEach(f => {
+        const onclick = (f.type === 'formula')
+          ? 'onclick="showFormulaDetail(\'' + escapeJs(o.id) + '\', \'' + escapeJs(f.key) + '\')"'
+          : 'onclick="startInlineEdit(this, \'' + escapeJs(o.id) + '\', \'' + escapeJs(f.key) + '\')"';
+        html += '<div class="compact-cell" ' + onclick + ' title="' + (f.type === 'formula' ? escapeHtml(f.label) + '（点击查看计算过程）' : escapeHtml(f.label)) + '">' + renderCellValue(f, o) + '</div>';
+      });
+      html += '</div>';
+      html += '</div>';
+      return html;
+    }
+
     function renderCompactList() {
       const container = document.getElementById('compactList');
       if (!container) return;
       const list = getFilteredOrders();
-      // 紧凑行显示用户勾选的字段（包括隐藏字段，隐藏只影响表格/卡片列表显示）
-      const keyFields = fieldsConfig.filter(f => getCompactFieldKeys().indexOf(f.key) >= 0);
       if (list.length === 0) {
         container.innerHTML = '<div style="text-align:center;color:#999;padding:30px;">暂无订单，点击右上角 + 新增订单</div>';
         return;
       }
-      let html = '';
-      list.forEach(o => {
-        const checked = selectedOrders.has(o.id) ? 'checked' : '';
-        html += '<div class="compact-row" data-id="' + escapeAttr(o.id) + '">';
-        html += '<label class="cr-check" title="长按进入编辑"><input type="checkbox" ' + checked + ' onchange="toggleSelectOrder(\'' + escapeJs(o.id) + '\', this.checked)"></label>';
-        html += '<div class="compact-cells">';
-        keyFields.forEach(f => {
-          const isFormula = f.type === 'formula';
-          const onclick = isFormula
-            ? 'onclick="showFormulaDetail(\'' + escapeJs(o.id) + '\', \'' + escapeJs(f.key) + '\')"'
-            : 'onclick="startInlineEdit(this, \'' + escapeJs(o.id) + '\', \'' + escapeJs(f.key) + '\')"';
-          html += '<div class="compact-cell" ' + onclick + ' title="' + (isFormula ? escapeHtml(f.label) + '（点击查看计算过程）' : escapeHtml(f.label)) + '">' + renderCellValue(f, o) + '</div>';
-        });
-        html += '</div>';
-        html += '</div>';
-      });
-      container.innerHTML = html;
-      // 长按勾选框 → 进入编辑（每行渲染后绑定）
-      Array.prototype.forEach.call(container.querySelectorAll('.compact-row'), row => {
-        bindCompactLongPress(row, row.getAttribute('data-id'));
-      });
+      renderWindow(_winStart, _winCount || windowSize(), null);
     }
     function bindCompactLongPress(rowEl, orderId) {
       const check = rowEl.querySelector('.cr-check input');
@@ -4195,8 +4498,23 @@
       }
       order[field.key] = value;
       saveData('行内编辑: ' + field.label);
-      render();
+      afterCellEdit(order.id);
       closeInlineEditor();
+    }
+
+    // 改完一个单元格后的最小刷新：只重画那一行 + 统计栏（上千条订单时这是"不卡"的关键）
+    function afterCellEdit(orderId) {
+      // 只清公式缓存和统计缓存，保留过滤结果缓存（避免把上千条重新过滤+排序一遍）
+      _formulaCache = null;
+      _statsValuesCache = null;
+      _statsSig = '';
+      // saveData 已经把 _filterSigCache 清掉了，这里补算一次
+      const list = getFilteredOrders();
+      _currentList = list;
+      renderStats();
+      if (!refreshOrderRow(orderId)) {
+        render();     // 该行不在当前窗口里（比如被筛选掉了），退回整体刷新
+      }
     }
 
     // 批量同步：把修改应用到所有选中的订单
@@ -4257,7 +4575,7 @@
       }
       pushToDefaults(order);
       saveData('行内编辑: ' + field.label);
-      render();
+      afterCellEdit(order.id);
       closeInlineEditor();
     }
 
@@ -5174,6 +5492,7 @@
     document.getElementById('ghToken').value = syncToken || '';
     document.getElementById('ghGistId').value = syncGistId || '';
     render();
+    bindListScroll();  // 长列表滚动加载（只绑一次）
     updateUndoRedoButtons(); // 初始按钮状态（两个都是禁用）
     // 初始化 IndexedDB 备份系统并启动自动备份调度
     initBackupDB().then(db => {
@@ -5185,7 +5504,7 @@
     });
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.09.13-6'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.09.13-7'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
