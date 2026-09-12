@@ -293,7 +293,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-10</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-11</button>
      <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
      <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
@@ -629,13 +629,22 @@
       <button class="close-x" onclick="closeModal('syncModal')">×</button>
     </div>
     <div class="modal-body">
-      <div style="margin-bottom:10px;padding:10px;background:#eef6ff;border-radius:6px;font-size:13px;color:#0958d9;">
-        首次使用：在 GitHub 生成一个 token（勾选 gist 权限），填入后点击"同步到云端"。系统会自动创建 Gist。之后在另一设备填入相同 token，点击"从云端同步"即可。
+      <div style="margin-bottom:10px;padding:10px;background:#eef6ff;border-radius:6px;font-size:13px;color:#0958d9;line-height:1.6;">
+        首次使用：在 GitHub 生成一个 token（<b>只勾 gist 权限</b>），填入后点「同步到云端」，系统会自动创建 Gist。<br>
+        「Gist ID」<b>留空即可</b>，创建成功后会自动填上。<br>
+        之后在另一台设备填入相同 token，点「从云端同步」就能拿到数据。
+      </div>
+      <div style="margin-bottom:10px;padding:8px 10px;background:#fffbe6;border:1px solid #ffe58f;border-radius:6px;font-size:12px;color:#ad6800;line-height:1.6;">
+        🔒 <b>这个 Token 就是你的钥匙，别给别人看</b>（别截图、别发到群里）。它只保存在你手机里，<b>不会被上传到云端</b>。
       </div>
       <div class="form-row">
         <label>GitHub Token</label>
         <div class="ctl">
-          <input class="form-input" id="ghToken" placeholder="ghp_xxxxxxxxxxxxxxxx">
+          <div style="display:flex;gap:6px;align-items:center;">
+            <input class="form-input" id="ghToken" type="password" placeholder="ghp_xxxxxxxxxxxxxxxx" autocomplete="off" spellcheck="false" style="flex:1;">
+            <button type="button" class="btn btn-secondary btn-sm" id="ghTokenEye" onclick="toggleTokenVisible()" title="显示/隐藏">👁</button>
+          </div>
+          <div class="form-row-hint">填完可以点眼睛确认没打错。这个 Token 只存在你手机里，<b>不会被上传</b>。</div>
         </div>
       </div>
       <div class="form-row">
@@ -645,7 +654,7 @@
           <div class="form-row-hint">首次留空，系统创建后会自动回填，建议复制保存</div>
         </div>
       </div>
-      <div id="syncStatus" style="font-size:13px;padding:8px;border-radius:4px;"></div>
+      <div id="syncStatus" style="font-size:13px;padding:8px;border-radius:4px;white-space:pre-wrap;line-height:1.6;"></div>
     </div>
     <div class="modal-ftr">
       <button class="btn btn-secondary" onclick="closeModal('syncModal')">关闭</button>
@@ -1306,6 +1315,10 @@
         products: JSON.parse(JSON.stringify(products)),
         orders: JSON.parse(JSON.stringify(orders)),
         statsConfig: JSON.parse(JSON.stringify(statsConfig)),
+        // 同步设置也要进快照，否则从备份恢复后 Token/Gist 会丢、要重新填一遍
+        // （注意：导出的文件会用 exportSnapshot() 把这两项删掉，不会泄露）
+        syncToken: syncToken,
+        syncGistId: syncGistId,
         savedAt: new Date().toISOString()
       };
     }
@@ -5753,19 +5766,48 @@
       el.style.color = ok ? '#237804' : '#cf1322';
       el.innerText = msg;
     }
+    // 把接口返回的错误翻译成人话（401 是最常见的那个）
+    function explainSyncError(status, body) {
+      if (status === 401) {
+        return '❌ Token 无效（401 Bad credentials）。\n\n' +
+               '多半是这个 Token 已被 GitHub 自动吊销 —— 因为旧版本应用会把 Token 一起上传到 Gist，' +
+               'GitHub 扫到就作废。\n\n' +
+               '解决办法：去 github.com/settings/tokens 删掉旧的，重新生成一个（只勾 gist 权限），' +
+               '填进来再点「同步到云端」。';
+      }
+      if (status === 404) {
+        return '❌ 找不到这个 Gist（404）。可能 Gist ID 填错了，或者它已被删除。\n\n' +
+               '把「Gist ID」清空，再点「同步到云端」，系统会自动建一个新的。';
+      }
+      if (status === 403) {
+        return '❌ 被拒绝（403）。Token 权限不够，请确认生成 Token 时勾选了 gist 权限。';
+      }
+      return '❌ 上传失败：HTTP ' + status + ' ' + String(body || '').slice(0, 200);
+    }
+    // Token 输入框的显示 / 隐藏
+    function toggleTokenVisible() {
+      const inp = document.getElementById('ghToken');
+      const btn = document.getElementById('ghTokenEye');
+      if (!inp) return;
+      const hidden = inp.type === 'password';
+      inp.type = hidden ? 'text' : 'password';
+      if (btn) btn.innerText = hidden ? '🙈' : '👁';
+    }
 
     function syncToGist() {
       const token = document.getElementById('ghToken').value.trim();
       let gistId = document.getElementById('ghGistId').value.trim();
       if (!token) { showToast('⚠️ 请先填入 GitHub Token'); return; }
       setSyncStatus('正在上传...', true);
+      // ⚠️ 绝对不要把 Token 放进上传内容里！
+      // GitHub 会扫描 Gist 中的凭证特征，一旦发现就自动吊销该 Token ——
+      // 这正是历史上 Token 反复失效的根因（文档里的"旧 token 曾因泄露被自动撤销"）。
       const payload = {
         fieldsConfig: fieldsConfig,
         fieldDefaults: fieldDefaults,
         fieldHistory: fieldHistory,
         products: products,
         orders: orders,
-        syncToken: token,
         statsConfig: statsConfig,
         savedAt: new Date().toISOString()
       };
@@ -5814,7 +5856,8 @@
         setSyncStatus('✅ 同步成功！Gist ID: ' + syncGistId + '（以后会自动帮你备份到云端）', true);
       }).catch(err => {
         console.error(err);
-        setSyncStatus('❌ 上传失败：' + err.message, false);
+        const m = /HTTP (\d+)/.exec(err.message || '');
+        setSyncStatus(m ? explainSyncError(parseInt(m[1], 10), err.message) : ('❌ 上传失败：' + err.message), false);
       });
     }
 
@@ -5861,7 +5904,8 @@
         applyCloudData(parsed, token, gistId);
       }).catch(err => {
         console.error(err);
-        setSyncStatus('❌ 下载失败：' + err.message, false);
+        const m = /HTTP (\d+)/.exec(err.message || '');
+        setSyncStatus(m ? explainSyncError(parseInt(m[1], 10), err.message) : ('❌ 下载失败：' + err.message), false);
       });
     }
 
@@ -5920,11 +5964,13 @@
     // 自动同步到 Gist（只上传本地 → 云端，永远不会用云端数据覆盖本地）
     function autoSyncToCloud(reason) {
       if (!autosyncOn()) return;
+      if (reason !== 'manual' && !_hasUnsavedChanges) return;   // 没有新改动就不用发请求（省电省流量）
       const token = (syncToken || '').trim();
       if (!token) return;                        // 没配过同步，静默跳过
       const gistId = (syncGistId || '').trim();
       if (!gistId) return;                       // 还没创建过 Gist，跳过（避免误建多个）
       if (!navigator.onLine) return;             // 没网就等下次
+      // 注意：payload 里绝不能带 Token（会被 GitHub 扫描到并自动吊销）
       const payload = {
         fieldsConfig: fieldsConfig, fieldDefaults: fieldDefaults, fieldHistory: fieldHistory,
         products: products, orders: orders, statsConfig: statsConfig,
@@ -5975,7 +6021,7 @@
     }
     async function autoExportNow() {
       if (!_exportDirHandle) return false;
-      const data = getCurrentSnapshot();
+      const data = exportSnapshot();   // 导出的文件不带 Token
       const stamp = new Date();
       const pad = n => n < 10 ? '0' + n : '' + n;
       const name = EXPORT_PREFIX + stamp.getFullYear() + pad(stamp.getMonth() + 1) + pad(stamp.getDate()) +
@@ -6067,8 +6113,19 @@
       document.getElementById('syncModal').classList.add('show');
     }
 
+    // 导出用的快照：必须去掉 Token / Gist ID
+    // （你自己本地保存要留着它们，但导出的文件可能被转发、上传，带上凭证就是泄露）
+    function exportSnapshot() {
+      const d = getCurrentSnapshot();
+      delete d.syncToken;
+      delete d.syncGistId;
+      return d;
+    }
+    // 仅测试使用：设置同步凭证（生产代码请直接用全局变量）
+    function setTestToken(t, g) { syncToken = t || ''; syncGistId = g || ''; }
+
     function exportLocalData() {
-      const data = getCurrentSnapshot();
+      const data = exportSnapshot();   // 导出的文件不带 Token（防止转发时泄露）
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -6239,7 +6296,7 @@
     refreshBackupBanner();
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.09.13-10'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.09.13-11'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
