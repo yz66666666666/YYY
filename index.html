@@ -293,7 +293,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-9</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-10</button>
      <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
      <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
@@ -880,6 +880,17 @@
     let editingId = null;
     let syncToken = '';
     let syncGistId = '';
+
+    // 是否有"改了但还没同步到云端"的改动（供自动同步判断，存 localStorage 以便重启后仍知道）
+    let _hasUnsavedChanges = false;
+    function noteLocalChange() {
+      _hasUnsavedChanges = true;
+      try { localStorage.setItem('om_localDirty', '1'); } catch (e) {}
+    }
+    function clearLocalChange() {
+      _hasUnsavedChanges = false;
+      try { localStorage.removeItem('om_localDirty'); } catch (e) {}
+    }
 
     // ============ OCR 截图识别（本地 PaddleOCR 浏览器版） ============
     let ocrEnginePromise = null;   // 懒加载的 OCR 引擎实例
@@ -2376,13 +2387,87 @@
         statsConfig: statsConfig,
         savedAt: new Date().toISOString()
       };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      // 存进浏览器。这里必须能"存不进去"的情况：空间满了会抛异常，
+      // 如果不管它，界面看起来一切正常但改动全都没保存（最阴险的故障）。
+      safeSetItem(STORAGE_KEY, JSON.stringify(payload));
       // 数据变了：清掉渲染缓存，保证统计栏/列表拿到的是新数据
       invalidateRenderCaches();
       // 记录操作历史到 IndexedDB
       if (action) {
         saveHistorySnapshot(action);
       }
+      // 顺手更新"有未同步改动"的标记（供自动同步判断）
+      _hasUnsavedChanges = true;
+      noteLocalChange();
+    }
+
+    // ==================== 存储空间保护（低风险但很重要） ====================
+    // 浏览器给每个网站约 5MB 的 localStorage。超了之后 setItem 会抛异常，
+    // 一旦发生，用户之后所有改动都存不进去 —— 所以必须抓住并大声提醒。
+    let _storageWarned = false;
+    let _lastQuotaCheck = 0;
+    function safeSetItem(key, value) {
+      try {
+        localStorage.setItem(key, value);
+        checkStorageQuota(value);
+        return true;
+      } catch (e) {
+        const isQuota = (e && (
+          e.name === 'QuotaExceededError' ||
+          e.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+          e.code === 22 || e.code === 1014
+        ));
+        showStorageAlert(isQuota
+          ? '⚠️ 浏览器存储空间已满，刚才的改动没能保存！请立刻「导出本地数据」备份，并清理历史备份或带图片的订单。'
+          : '⚠️ 数据保存失败：' + (e && e.message ? e.message : e) + '。请立刻导出备份。');
+        return false;
+      }
+    }
+    // 估算已用空间，接近上限就提前预警（不用等它真的撑爆）
+    function checkStorageQuota(currentValue) {
+      const now = Date.now();
+      if (now - _lastQuotaCheck < 30000) return;   // 最多 30 秒查一次，别拖慢保存
+      _lastQuotaCheck = now;
+      try {
+        let used = 0;
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          const v = localStorage.getItem(k) || '';
+          used += (k.length + v.length) * 2;       // 粗略按 UTF-16 计
+        }
+        const MB = 1024 * 1024;
+        const usedMB = used / MB;
+        // 主数据本身多大（用于判断是不是图片撑爆的）
+        const dataBytes = (currentValue || '').length * 2;
+        if (used > 4 * MB && !_storageWarned) {
+          _storageWarned = true;
+          showStorageAlert('⚠️ 浏览器存储已用 ' + usedMB.toFixed(1) + 'MB（上限通常 5MB），快满了！\n' +
+            (dataBytes > 2 * MB ? '主要是订单数据太大——多半是带图片的订单占的。\n' : '') +
+            '建议：点「☁️ 同步」→「导出本地数据」存一份到手机文件里。');
+        } else if (used < 3 * MB) {
+          _storageWarned = false;                   // 降下来了就重置，下次还能再提醒
+        }
+      } catch (e) { /* 查询失败就算了，不影响主流程 */ }
+    }
+    // 存储相关的严重提示：用不会被忽略的方式显示
+    function showStorageAlert(msg) {
+      let el = document.getElementById('storageAlert');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'storageAlert';
+        el.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:3000;background:#cf1322;color:#fff;' +
+          'padding:12px 44px 12px 14px;font-size:13px;line-height:1.6;white-space:pre-wrap;box-shadow:0 1px 6px rgba(0,0,0,0.3);';
+        const close = document.createElement('button');
+        close.innerText = '×';
+        close.style.cssText = 'position:absolute;right:8px;top:8px;background:none;border:none;color:#fff;font-size:20px;line-height:1;cursor:pointer;';
+        close.onclick = function () { el.remove(); };
+        el.appendChild(close);
+        document.body.appendChild(el);
+      }
+      const body = document.createElement('div');
+      body.innerText = msg;
+      el.insertBefore(body, el.firstChild);
+      console.error('[存储告警]', msg);
     }
 
     function updateUndoRedoButtons() {
@@ -2808,7 +2893,28 @@
       if (navigator.vibrate) { try { navigator.vibrate(20); } catch (e) {} }
     }
 
-    function moveDraggedOrder(clientY) {
+    // 拖拽到屏幕上下边缘时自动滚动页面（1000 条订单时不然没法把单子拖远）
+    let _dragAutoScrollTimer = null;
+    function dragAutoScroll(clientY) {
+      const vh = window.innerHeight;
+      const EDGE = 90;                 // 距离边缘多少像素算"到边了"
+      let speed = 0;
+      if (clientY < EDGE) speed = -Math.max(6, Math.round((EDGE - clientY) / 4));
+      else if (clientY > vh - EDGE) speed = Math.max(6, Math.round((clientY - (vh - EDGE)) / 4));
+      if (_dragAutoScrollTimer) { clearInterval(_dragAutoScrollTimer); _dragAutoScrollTimer = null; }
+      if (speed === 0) return;
+      _dragAutoScrollTimer = setInterval(function () {
+        if (!orderDragState) { clearInterval(_dragAutoScrollTimer); _dragAutoScrollTimer = null; return; }
+        window.scrollBy(0, speed);
+        // 滚动后重新把拖动的那一行挪到手指/鼠标位置
+        moveDraggedOrder(clientY, true);
+      }, 40);
+    }
+    function stopDragAutoScroll() {
+      if (_dragAutoScrollTimer) { clearInterval(_dragAutoScrollTimer); _dragAutoScrollTimer = null; }
+    }
+
+    function moveDraggedOrder(clientY, skipAutoScroll) {
       const st = orderDragState;
       if (!st) return;
       const container = getOrderListContainer();
@@ -2822,6 +2928,7 @@
       }
       if (insertBefore) container.insertBefore(st.el, insertBefore);
       else container.appendChild(st.el);
+      if (!skipAutoScroll) dragAutoScroll(clientY);
     }
 
     function finishOrderDrag() {
@@ -2832,12 +2939,12 @@
       orderDragState = null;
       syncManualOrderFromDom();
       saveSortState();
+      stopDragAutoScroll();
       orderDragSuppressClick = true;
       setTimeout(function () { orderDragSuppressClick = false; }, 400);
       render();
     }
 
-    // 把当前可见列表的 DOM 顺序同步回 manualOrder（保留被筛选掉的订单原有相对顺序）
     // 把当前可见列表的 DOM 顺序同步回 manualOrder
     // 注意：开启虚拟滚动后，DOM 里只是整张列表的"一个连续窗口"，
     // 所以必须把窗口内的新顺序放回它原本的位置，绝不能把窗口外的订单都挤到后面去。
@@ -2965,7 +3072,12 @@
     // ============ 虚拟滚动（几千上万条也不卡的关键） ============
     // 思路：DOM 里永远只保留"看得见的那些行"，上下用两个撑高的空div占位。
     // 这样无论总共 100 条还是 10000 条，每次渲染的工作量都恒定（约 2 屏行数）。
-    const VROW_EST = 46;             // 每行预估高度（px），真实高度会被测量后修正
+    // 每行预估高度（px）：卡片比表格行高得多，所以分开估，避免滚动条长度错乱
+    function estRowHeight() {
+      if (mobileViewMode === 'card') return 240;   // 手机卡片大约这么高
+      if (mobileViewMode === 'table') return 46;
+      return 40;                                   // 紧凑行
+    }
     let _winStart = 0;               // 当前窗口第一行在列表中的下标
     let _winCount = 0;               // 当前窗口渲染了多少行
     let _currentList = [];           // 当前过滤+排序后的完整列表（纯数据）
@@ -2991,7 +3103,7 @@
     function windowSize() {
       // 一个窗口 = 视口高度的 2 倍左右，最少 40 行
       const h = window.innerHeight || 640;
-      return Math.max(40, Math.ceil((h * 2) / (_rowH || VROW_EST)) + 10);
+      return Math.max(40, Math.ceil((h * 2) / (_rowH || estRowHeight())) + 10);
     }
 
     function getActiveContainer() {
@@ -3020,7 +3132,7 @@
       ensureSpacers(container);
 
       // 顶部占位高度
-      const rowH = _rowH || VROW_EST;
+      const rowH = _rowH || estRowHeight();
       // 浏览器对元素高度有上限（约 3300 万 px），上万条时占位高度要压缩，否则滚动条会错乱
       const MAX_SPACER = 8000000;
       const scale = Math.min(1, MAX_SPACER / Math.max(1, total * rowH));
@@ -3069,6 +3181,31 @@
       if (scrollToListIndex != null) {
         scrollToIndex(scrollToListIndex);
       }
+      updateResultCount();
+    }
+
+    // 工具栏上的"共 N 条 / 筛出 N 条"提示（搜完能知道命中几条）
+    function updateResultCount() {
+      const bar = document.querySelector('.toolbar');
+      if (!bar) return;
+      const total = orders.length;
+      const shown = _currentList ? _currentList.length : total;
+      const kwEl = document.getElementById('searchInput');
+      const sfEl = document.getElementById('statusFilter');
+      const filtering = (kwEl && kwEl.value.trim() !== '') || (sfEl && sfEl.value !== '');
+      if (!filtering && shown === total) {
+        const old = document.getElementById('resultCount');
+        if (old) old.remove();
+        return;
+      }
+      let el = document.getElementById('resultCount');
+      if (!el) {
+        el = document.createElement('span');
+        el.id = 'resultCount';
+        el.style.cssText = 'font-size:12px;color:#1a73e8;background:#eef4ff;padding:3px 10px;border-radius:10px;white-space:nowrap;';
+        bar.appendChild(el);
+      }
+      el.innerText = '筛出 ' + shown + ' / ' + total + ' 条';
     }
 
     function measureRowHeight(container) {
@@ -3091,7 +3228,7 @@
     function scrollToIndex(idx) {
       const container = getActiveContainer();
       if (!container || !_spacerTop) return;
-      const rowH = _rowH || VROW_EST;
+      const rowH = _rowH || estRowHeight();
       const target = Math.round(idx * rowH);
       const top = container.getBoundingClientRect().top + window.scrollY + target;
       window.scrollTo(0, Math.max(0, top - 60));
@@ -3283,6 +3420,8 @@
       // 切换前记住屏幕中心的订单，切换后把它滚回屏幕中心，避免跳到页面顶部
       const centerId = findCenterOrderId();
       mobileViewMode = mode;
+      _rowH = 0;          // 行高缓存作废：卡片和紧凑行高度差很多，必须重新测量
+      _winStart = 0;
       saveViewSettings();
       document.body.setAttribute('data-mview', mode);
       updateViewSwitchButtons();
@@ -3453,9 +3592,35 @@
       return a.every(k => b.indexOf(k) >= 0);
     }
 
+    // 图片放大预览：改成"页内全屏"，不再用 window.open
+    // （手机浏览器会拦截弹窗，导致点了没反应）
     function showImgPreview(src) {
-      const w = window.open('', '_blank');
-      w.document.write('<title>图片预览</title><body style="margin:0;background:#000;display:flex;align-items:center;justify-content:center;min-height:100vh;"><img src="' + escapeAttr(src) + '" style="max-width:100%;max-height:100vh"></body>');
+      if (!src) return;
+      const close = function () {
+        const m = document.getElementById('imgPreviewMask');
+        if (m) m.style.display = 'none';
+        document.body.style.overflow = '';
+        document.removeEventListener('keydown', onEsc);
+      };
+      const onEsc = function (e) { if (e.key === 'Escape') close(); };
+      let mask = document.getElementById('imgPreviewMask');
+      if (!mask) {
+        mask = document.createElement('div');
+        mask.id = 'imgPreviewMask';
+        mask.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:4000;' +
+          'display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;';
+        mask.innerHTML = '<img id="imgPreviewImg" style="max-width:96vw;max-height:82vh;object-fit:contain;border-radius:6px;">' +
+          '<button class="btn btn-secondary btn-sm" id="imgPreviewClose">关闭</button>';
+        mask.addEventListener('click', function (e) {
+          if (e.target === mask || e.target.id === 'imgPreviewClose') close();
+        });
+        document.body.appendChild(mask);
+      }
+      document.getElementById('imgPreviewImg').src = src;
+      mask.style.display = 'flex';
+      document.body.style.overflow = 'hidden';   // 预览时锁住背景滚动
+      document.addEventListener('keydown', onEsc);
+      mask._close = close;
     }
 
     // ============ 新增 / 编辑订单表单 ============
@@ -5642,7 +5807,11 @@
           document.getElementById('ghGistId').value = data.id;
         }
         saveData();
-        setSyncStatus('✅ 同步成功！Gist ID: ' + syncGistId, true);
+        // 手动同步成功 → 记下时间、开启自动备份、撤掉黄条提醒
+        setSetting(LAST_SYNC_KEY, String(Date.now()));
+        clearLocalChange();
+        refreshBackupBanner();
+        setSyncStatus('✅ 同步成功！Gist ID: ' + syncGistId + '（以后会自动帮你备份到云端）', true);
       }).catch(err => {
         console.error(err);
         setSyncStatus('❌ 上传失败：' + err.message, false);
@@ -5672,6 +5841,35 @@
         const file = data.files && data.files[SYNC_GIST_FILENAME];
         if (!file || !file.content) throw new Error('Gist 中没有找到数据文件 ' + SYNC_GIST_FILENAME);
         const parsed = JSON.parse(file.content);
+        // 防"静默覆盖"：如果本机有还没备份到云端的改动，先让用户确认，
+        // 并把当前数据自动存一份到"被覆盖备份"，万一选错了还能找回来。
+        const dirty = getSetting('om_localDirty', '') === '1';
+        if (dirty) {
+          setSyncStatus('', true);
+          askConfirm({
+            title: '本机有尚未备份的改动',
+            message: '云端有 ' + ((parsed.orders || []).length) + ' 条订单，本机有 ' + orders.length + ' 条。' +
+                     '继续会【用云端数据覆盖本机】。',
+            extra: '本机当前数据会先自动存一份到「历史备份 → 被覆盖备份」，可以回退。\n' +
+                   '如果你在本机新改的单子还没同步，建议先点「📤 同步到云端」。',
+            okText: '仍然用云端覆盖本机',
+            danger: true,
+            onOk: function () { applyCloudData(parsed, token, gistId); }
+          });
+          return;
+        }
+        applyCloudData(parsed, token, gistId);
+      }).catch(err => {
+        console.error(err);
+        setSyncStatus('❌ 下载失败：' + err.message, false);
+      });
+    }
+
+    // 把云端数据落到本机（先备份当前数据，再覆盖）
+    function applyCloudData(parsed, token, gistId) {
+      try {
+        addBackup('overwritten', getCurrentSnapshot(),
+          '同步覆盖前备份 ' + new Date().toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }));
         if (parsed.fieldsConfig && parsed.fieldsConfig.length) fieldsConfig = mergeFieldsFromStorage(parsed.fieldsConfig);
         if (parsed.fieldDefaults) fieldDefaults = parsed.fieldDefaults;
         if (parsed.fieldHistory) fieldHistory = parsed.fieldHistory;
@@ -5680,16 +5878,195 @@
         if (parsed.statsConfig && Array.isArray(parsed.statsConfig)) statsConfig = parsed.statsConfig;
         syncToken = token;
         syncGistId = gistId;
+        document.getElementById('ghToken').value = token;
+        document.getElementById('ghGistId').value = gistId;
+        markStatsDirty();          // 数据整体换了 → 统计栏从头算
         saveData();
+        clearLocalChange();
+        setSetting(LAST_SYNC_KEY, String(Date.now()));
         render();
+        refreshBackupBanner();
         setSyncStatus('✅ 同步成功！共载入 ' + orders.length + ' 条订单', true);
-      }).catch(err => {
+      } catch (err) {
         console.error(err);
-        setSyncStatus('❌ 下载失败：' + err.message, false);
-      });
+        setSyncStatus('❌ 载入失败：' + (err && err.message ? err.message : err), false);
+      }
     }
 
     // ============ 本地导出导入 ============
+    // ==================== 自动备份（Gist 自动同步 + 每周自动导出） ====================
+    // 目的：让订单数据有"第二个副本"。浏览器里的主数据和备份都在同一块地基上，
+    // 手机清缓存/丢失就会一起没，所以必须往外面放一份。
+    // 设计原则：绝不用云端数据覆盖本地（自动同步只上传、不下载），所以不可能弄丢订单。
+    const AUTOSYNC_KEY = 'om_autosync';          // '1' = 开启自动同步到云端
+    const LAST_SYNC_KEY = 'om_lastSyncAt';       // 上次成功同步的时间
+    const LAST_EXPORT_KEY = 'om_lastExportAt';   // 上次成功导出的时间
+    const EXPORT_KEEP = 5;                       // 导出文件夹里最多保留几份（多的自动删最旧）
+    const EXPORT_PREFIX = '订单备份-';
+    const STALE_DAYS = 3;                        // 超过几天没备份就出来提醒
+    let _exportDirHandle = null;                 // 用户授权过的导出文件夹
+
+    function getSetting(key, dflt) {
+      try { const v = localStorage.getItem(key); return v === null ? dflt : v; } catch (e) { return dflt; }
+    }
+    function setSetting(key, val) {
+      try { localStorage.setItem(key, val); } catch (e) {}
+    }
+    function autosyncOn() { return getSetting(AUTOSYNC_KEY, '1') === '1'; }
+    function lastSyncTime() { const t = parseInt(getSetting(LAST_SYNC_KEY, '0'), 10) || 0; return t; }
+    function lastExportTime() { const t = parseInt(getSetting(LAST_EXPORT_KEY, '0'), 10) || 0; return t; }
+    function daysAgo(t) { return t ? (Date.now() - t) / 86400000 : Infinity; }
+
+    // 自动同步到 Gist（只上传本地 → 云端，永远不会用云端数据覆盖本地）
+    function autoSyncToCloud(reason) {
+      if (!autosyncOn()) return;
+      const token = (syncToken || '').trim();
+      if (!token) return;                        // 没配过同步，静默跳过
+      const gistId = (syncGistId || '').trim();
+      if (!gistId) return;                       // 还没创建过 Gist，跳过（避免误建多个）
+      if (!navigator.onLine) return;             // 没网就等下次
+      const payload = {
+        fieldsConfig: fieldsConfig, fieldDefaults: fieldDefaults, fieldHistory: fieldHistory,
+        products: products, orders: orders, statsConfig: statsConfig,
+        savedAt: new Date().toISOString()
+      };
+      const files = {};
+      files[SYNC_GIST_FILENAME] = { content: JSON.stringify(payload, null, 2) };
+      fetch('https://api.github.com/gists/' + gistId, {
+        method: 'PATCH',
+        headers: {
+          'Accept': 'application/vnd.github.v3+json',
+          'Authorization': 'token ' + token,
+          'Content-Type': 'application/json',
+          'User-Agent': 'OrderManager/1.0'
+        },
+        body: JSON.stringify({ description: '订单管理系统同步数据', files: files })
+      }).then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      }).then(function () {
+        setSetting(LAST_SYNC_KEY, String(Date.now()));
+        clearLocalChange();
+        refreshBackupBanner();
+        if (reason === 'manual') showToast('☁️ 已自动备份到云端');
+      }).catch(function (err) {
+        console.warn('自动同步失败（不影响本地数据）', err);
+        if (reason === 'manual') showToast('⚠️ 自动备份到云端失败：' + (err && err.message ? err.message : err));
+      });
+    }
+
+    // 每周自动导出到用户指定的文件夹（手机 Chrome 支持；不支持时退化成"提醒你手动导出"）
+    function canAutoExport() {
+      return (typeof window.showDirectoryPicker === 'function') && !!_exportDirHandle;
+    }
+    async function pickExportFolder() {
+      if (typeof window.showDirectoryPicker !== 'function') {
+        showToast('ℹ️ 当前浏览器不支持自动导出，请用「导出本地数据」手动保存');
+        return false;
+      }
+      try {
+        _exportDirHandle = await window.showDirectoryPicker({ mode: 'readwrite', id: 'om-export' });
+        showToast('✅ 已选定备份文件夹，之后每周自动导出');
+        await autoExportNow();
+        return true;
+      } catch (e) {
+        return false;   // 用户取消
+      }
+    }
+    async function autoExportNow() {
+      if (!_exportDirHandle) return false;
+      const data = getCurrentSnapshot();
+      const stamp = new Date();
+      const pad = n => n < 10 ? '0' + n : '' + n;
+      const name = EXPORT_PREFIX + stamp.getFullYear() + pad(stamp.getMonth() + 1) + pad(stamp.getDate()) +
+                   '-' + pad(stamp.getHours()) + pad(stamp.getMinutes()) + '.json';
+      try {
+        const fileHandle = await _exportDirHandle.getFileHandle(name, { create: true });
+        const w = await fileHandle.createWritable();
+        await w.write(JSON.stringify(data, null, 2));
+        await w.close();
+        await pruneOldExports();
+        setSetting(LAST_EXPORT_KEY, String(Date.now()));
+        refreshBackupBanner();
+        return true;
+      } catch (e) {
+        console.warn('自动导出失败', e);
+        return false;
+      }
+    }
+    // 只保留最近 5 份，多的删最旧的（避免变成手机里的垃圾）
+    async function pruneOldExports() {
+      if (!_exportDirHandle) return;
+      try {
+        const names = [];
+        for await (const entry of _exportDirHandle.values()) {
+          if (entry.kind === 'file' && entry.name.indexOf(EXPORT_PREFIX) === 0) names.push(entry.name);
+        }
+        names.sort();                                  // 文件名带日期，字典序即时间序
+        while (names.length > EXPORT_KEEP) {
+          const old = names.shift();
+          try { await _exportDirHandle.removeEntry(old); } catch (e) {}
+        }
+      } catch (e) {}
+    }
+    // 每周检查一次是否该自动导出
+    function maybeWeeklyExport() {
+      if (daysAgo(lastExportTime()) < 7) return;
+      if (!_exportDirHandle) return;                   // 没授权文件夹就不自动（靠黄条提醒）
+      autoExportNow();
+    }
+
+    // 顶部黄色提醒条：超过 3 天没有任何备份就出来喊人
+    function refreshBackupBanner() {
+      const existing = document.getElementById('backupBanner');
+      const dSync = daysAgo(lastSyncTime());
+      const dExport = daysAgo(lastExportTime());
+      const configured = !!(syncToken && syncGistId);
+      let show = false, text = '';
+      if (!configured) {
+        show = true;
+        text = '🛡️ 还没有设置云备份。建议点「☁️ 同步」填入 GitHub Token，之后会自动帮你备份（或每周导出到手机文件夹）。';
+      } else if (Math.min(dSync, dExport) > STALE_DAYS) {
+        const d = Math.floor(Math.min(dSync, dExport));
+        show = true;
+        text = '🛡️ 已经 ' + d + ' 天没有备份了。点这里立刻备份一份，防止手机丢失或清缓存后订单找不回。';
+      }
+      if (!show) { if (existing) existing.remove(); return; }
+      if (existing) {
+        const t = existing.querySelector ? existing.querySelector('.bb-text') : null;
+        if (t) t.innerText = text;
+        return;
+      }
+      const bar = document.createElement('div');
+      bar.id = 'backupBanner';
+      bar.style.cssText = 'background:#fffbe6;border-bottom:1px solid #ffe58f;color:#ad6800;padding:8px 12px;' +
+        'font-size:13px;line-height:1.5;display:flex;align-items:center;gap:10px;';
+      const span = document.createElement('span');
+      span.className = 'bb-text';
+      span.style.cssText = 'flex:1;';
+      span.innerText = text;
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-primary btn-sm';
+      btn.innerText = '立刻备份';
+      btn.onclick = function () {
+        if (syncToken && syncGistId) autoSyncToCloud('manual');
+        else if (typeof window.showDirectoryPicker === 'function') pickExportFolder();
+        else { openSyncModal(); }
+      };
+      const close = document.createElement('button');
+      close.className = 'btn btn-secondary btn-sm';
+      close.innerText = '稍后';
+      close.onclick = function () { bar.remove(); };
+      bar.appendChild(span); bar.appendChild(btn); bar.appendChild(close);
+      const header = document.querySelector('header');
+      if (header && header.parentNode) header.parentNode.insertBefore(bar, header.nextSibling);
+      else document.body.insertBefore(bar, document.body.firstChild);
+    }
+
+    function openSyncModal() {
+      document.getElementById('syncModal').classList.add('show');
+    }
+
     function exportLocalData() {
       const data = getCurrentSnapshot();
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -5841,8 +6218,28 @@
       }
     });
 
+    // ============ 自动备份调度（本地 IndexedDB 之外的"第二份副本"） ============
+    // 1) 启动后静默把本地数据同步到 Gist（只上传，不会用云端覆盖本地，所以不可能弄丢订单）
+    // 2) 每周自动导出一次 JSON 到用户选定的文件夹，只保留最近 5 份
+    // 3) 超过 3 天没备份就在顶部显示黄条提醒
+    _hasUnsavedChanges = getSetting('om_localDirty', '') === '1';
+    setTimeout(function () {
+      refreshBackupBanner();
+      autoSyncToCloud('auto');       // 静默上传（没配同步会自己跳过）
+      maybeWeeklyExport();           // 没授权文件夹会自己跳过
+    }, 4000);                        // 等页面先渲染完，别抢启动时间
+    // 页面被隐藏/关闭前再补一次同步（手机切后台也算，这是最贴近"关闭时同步"的时机）
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden && autosyncOn()) autoSyncToCloud('auto');
+    });
+    window.addEventListener('pagehide', function () {
+      if (autosyncOn()) autoSyncToCloud('auto');
+    });
+    // 启动时如果发现很久没备份，立刻把黄条显示出来（上面 setTimeout 里也会再刷新一次）
+    refreshBackupBanner();
+
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.09.13-9'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.09.13-10'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
@@ -5913,10 +6310,19 @@
           setTimeout(() => { try { reg.update(); } catch(e){} }, 10000);
         }).catch(() => {});
 
-        // 新版本激活后刷新
+        // 新版本激活后刷新页面。
+        // 关键：必须区分两种情况，否则会出现"每次打开都白刷一次"的毛病 ——
+        //   ① 本来没有 SW（首次访问 / 更新后首次进入）→ 接管时不要刷新
+        //   ② 本来有 SW，新版本替换了它 → 才需要刷新一次拿到新代码
+        const hadController = !!navigator.serviceWorker.controller;
         let reloading = false;
         navigator.serviceWorker.addEventListener('controllerchange', () => {
-          if (!reloading) { reloading = true; location.reload(); }
+          if (!hadController) return;                 // 首次接管，不刷
+          if (sessionStorage.getItem('om_sw_reloaded') === '1') return;  // 本次会话已经刷过，防循环
+          if (reloading) return;
+          reloading = true;
+          try { sessionStorage.setItem('om_sw_reloaded', '1'); } catch (e) {}
+          location.reload();
         });
       })();
     }
