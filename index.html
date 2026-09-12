@@ -293,7 +293,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-12</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-13</button>
      <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
      <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
@@ -1350,10 +1350,37 @@
     function showStoragePanel() {
       const rep = storageReport();
       const MB = 1024 * 1024;
+      const ownBytes = rep.localStorage.filter(item => isOwnKey(item.key)).reduce((s, x) => s + x.bytes, 0);
+      const otherBytes = rep.totalLocal - ownBytes;
+      const otherList = rep.localStorage.filter(item => !isOwnKey(item.key));
+
       let html = '<div style="font-size:13px;line-height:1.8;color:#333;">';
       html += '<div style="margin-bottom:10px;padding:8px 10px;background:#fff1f0;border:1px solid #ffccc7;border-radius:6px;color:#a8071a;">';
-      html += '浏览器存储已用 <b>' + (rep.totalLocal / MB).toFixed(2) + ' MB</b>（上限通常约 5MB）。超过上限后，你的改动就存不进去了。';
+      html += '浏览器存储已用 <b>' + (rep.totalLocal / MB).toFixed(2) + ' MB</b>。超过浏览器上限后，你的改动就<b>存不进去</b>了（界面正常但一刷新就回退）。';
       html += '</div>';
+
+      html += '<div style="margin-bottom:10px;display:flex;gap:8px;flex-wrap:wrap;">';
+      html += '<div style="flex:1;min-width:140px;padding:8px 10px;background:#f6ffed;border:1px solid #b7eb8f;border-radius:6px;">' +
+              '本系统数据<br><b>' + (ownBytes / MB).toFixed(2) + ' MB</b></div>';
+      if (otherBytes > 0) {
+        html += '<div style="flex:1;min-width:140px;padding:8px 10px;background:#fff7e6;border:1px solid #ffd591;border-radius:6px;color:#ad6800;">' +
+                '同网站其他应用<br><b>' + (otherBytes / MB).toFixed(2) + ' MB</b></div>';
+      }
+      html += '</div>';
+
+      if (otherBytes > ownBytes && otherList.length > 0) {
+        html += '<div style="margin-bottom:10px;padding:8px 10px;background:#fffbe6;border:1px solid #ffe58f;border-radius:6px;color:#ad6800;">';
+        html += '🔎 <b>占空间的主要是"同一个网站下的其他应用"</b>，不是订单数据。<br>' +
+                '浏览器规定：<b>同一个域名下的所有网页共用同一个存储空间</b>。' +
+                '所以别的应用占满了，这个订单系统一样存不进去。<br><br>' +
+                '主要占用：<br>';
+        otherList.slice(0, 4).forEach(item => {
+          const app = item.key.split('-')[0];
+          html += '· <code>' + escapeHtml(app) + '</code> 相关：' + (item.bytes / MB).toFixed(2) + ' MB<br>';
+        });
+        html += '<br>👉 请到那个页面去把不需要的方案/设置删掉。';
+        html += '</div>';
+      }
 
       if (rep.images && rep.images.count > 0) {
         html += '<div style="margin-bottom:10px;">📷 带图片的订单：<b>' + rep.images.count + '</b> 处，图片合计约 <b>' +
@@ -1361,22 +1388,29 @@
                 (rep.images.bytes / MB > 2 ? ' —— <b style="color:#a8071a;">这是主要占用来源</b>' : '') + '</div>';
       }
 
-      html += '<div style="margin-bottom:6px;font-weight:600;">占用明细（前 6 项）：</div>';
+      html += '<div style="margin-bottom:6px;font-weight:600;">占用明细：</div>';
       html += '<div style="font-family:monospace;font-size:12px;background:#fafafa;border-radius:6px;padding:8px;margin-bottom:12px;word-break:break-all;">';
-      rep.localStorage.slice(0, 6).forEach(item => {
+      rep.localStorage.slice(0, 8).forEach(item => {
         const name = item.key === STORAGE_KEY ? '订单主数据' : item.key;
-        html += '· ' + escapeHtml(name) + '：' + (item.bytes / MB).toFixed(2) + ' MB<br>';
+        const mine = isOwnKey(item.key);
+        html += '· ' + escapeHtml(name) + '：' + (item.bytes / MB).toFixed(2) + ' MB' +
+                (mine ? '' : ' <span style="color:#ad6800;">（其他应用）</span>') + '<br>';
       });
       html += '</div>';
 
       html += '<div style="margin-bottom:10px;padding:8px 10px;background:#f6ffed;border:1px solid #b7eb8f;border-radius:6px;color:#237804;">';
-      html += '✅ <b>自动备份不占这里的空间</b>（存在 IndexedDB 里，容量大得多），所以「快捷操作」里的清理不会影响你的自动备份。';
+      html += '✅ <b>本系统的自动备份不占这里的空间</b>（存在 IndexedDB 里，容量大得多），清理它不会影响你的自动备份。';
       html += '</div>';
 
       html += '<div style="margin-bottom:6px;font-weight:600;">建议按顺序做：</div>';
       html += '<ol style="margin:0;padding-left:20px;">';
-      html += '<li><b>先导出</b>：点「💾 导出本地数据」，存一份到手机（这是你的保险）</li>';
-      html += '<li><b>再清理</b>：如果主要是图片占的，需要删除一些带图订单，或让我把图片改成存到 IndexedDB</li>';
+      html += '<li><b>先导出</b>：点下面的「⬇️ 立即导出」，存一份到手机（这是你的保险）</li>';
+      if (otherBytes > ownBytes) {
+        html += '<li><b>再去清别的应用</b>：按上面提示的地址去那个页面删除不用的方案</li>';
+      } else {
+        html += '<li><b>再清理</b>：删掉一些带图片的订单</li>';
+      }
+      html += '<li><b>然后回来刷新</b>，红条消失就正常了</li>';
       html += '</ol>';
       html += '</div>';
 
@@ -1572,12 +1606,28 @@
           return;
         }
         const limit = BACKUP_LIMITS[storeName];
-        let html = '<div style="font-size:12px;color:#888;margin-bottom:8px;">共 ' + list.length + ' 条（最多保留 ' + limit + ' 条）</div>';
+        const nowCount = orders.length;
+        // 数据丢失检测：如果某个备份里的订单数比现在多，说明当时的数据比现在完整
+        //（常见原因：浏览器存储被占满，后来的改动没保存进去）
+        const richer = list.filter(it => (it.orderCount || 0) > nowCount);
+        let html = '<div style="font-size:12px;color:#888;margin-bottom:8px;">共 ' + list.length + ' 条（最多保留 ' + limit + ' 条）　当前订单数：<b>' + nowCount + '</b></div>';
+        if (richer.length > 0) {
+          const best = richer.reduce((a, b) => (b.orderCount > a.orderCount ? b : a));
+          const t = new Date(best.timestamp).toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+          html += '<div style="margin-bottom:10px;padding:10px;background:#fff2e8;border:1px solid #ffbb96;border-radius:6px;color:#ad4e00;font-size:13px;line-height:1.7;">' +
+            '⚠️ <b>发现更完整的历史数据</b><br>' +
+            '这里有一份备份包含 <b>' + best.orderCount + '</b> 条订单，比现在的 <b>' + nowCount + '</b> 条<b>多 ' +
+            (best.orderCount - nowCount) + ' 条</b>（' + t + '）。<br>' +
+            '说明那之后的改动可能没有保存成功（常见原因：浏览器存储被占满）。' +
+            '如果那些订单确实不见了，点这条备份的「恢复」就能找回来。' +
+            '</div>';
+        }
         html += '<div style="display:flex;flex-direction:column;gap:8px;">';
         list.forEach(item => {
           const time = new Date(item.timestamp).toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' });
           const label = escapeHtml(item.label || '');
           const count = item.orderCount || 0;
+          const isRicher = count > nowCount;
           const isPendingRestore = pendingBackupAction && pendingBackupAction.type === 'restore'
             && pendingBackupAction.storeName === storeName && pendingBackupAction.id === item.id;
           let btns;
@@ -1590,10 +1640,13 @@
           } else {
             btns = '<button class="btn btn-primary btn-sm" onclick="askRestoreBackup(\'' + storeName + '\', ' + item.id + ')">恢复</button>';
           }
-          html += '<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#f9f9f9;border:1px solid #e8e8e8;border-radius:6px;' + (isPendingRestore ? 'border-color:#cf1322;background:#fff5f5;"' : '"') + '>' +
+          html += '<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#f9f9f9;border:1px solid ' +
+            (isPendingRestore ? '#cf1322' : (isRicher ? '#ffbb96' : '#e8e8e8')) + ';border-radius:6px;' +
+            (isPendingRestore ? 'background:#fff5f5;' : (isRicher ? 'background:#fff7e6;' : '')) + '">' +
             '<div style="flex:1;">' +
               '<div style="font-size:13px;font-weight:500;color:#333;">' + label + '</div>' +
-              '<div style="font-size:11px;color:#999;margin-top:2px;">' + time + ' · ' + count + ' 条订单</div>' +
+              '<div style="font-size:11px;color:#999;margin-top:2px;">' + time + ' · <b' + (isRicher ? ' style="color:#ad4e00;"' : '') + '>' + count + ' 条订单</b>' +
+              (isRicher ? ' <span style="color:#ad4e00;">← 比现在多</span>' : '') + '</div>' +
             '</div>' +
             btns +
           '</div>';
@@ -2539,24 +2592,48 @@
       _lastQuotaCheck = now;
       try {
         let used = 0;
+        const others = [];            // 同一个域名下"不是本应用"的数据
         for (let i = 0; i < localStorage.length; i++) {
           const k = localStorage.key(i);
           const v = localStorage.getItem(k) || '';
-          used += (k.length + v.length) * 2;       // 粗略按 UTF-16 计
+          const bytes = (k.length + v.length) * 2;       // 粗略按 UTF-16 计
+          used += bytes;
+          if (!isOwnKey(k)) others.push({ key: k, bytes: bytes });
         }
         const MB = 1024 * 1024;
         const usedMB = used / MB;
-        // 主数据本身多大（用于判断是不是图片撑爆的）
         const dataBytes = (currentValue || '').length * 2;
         if (used > 4 * MB && !_storageWarned) {
           _storageWarned = true;
-          showStorageAlert('⚠️ 浏览器存储已用 ' + usedMB.toFixed(1) + 'MB（上限通常 5MB），快满了！\n' +
-            (dataBytes > 2 * MB ? '主要是订单数据太大——多半是带图片的订单占的。\n' : '') +
-            '建议：点「☁️ 同步」→「导出本地数据」存一份到手机文件里。');
+          // 关键：把"谁占的"说清楚。同一个域名下的其他网页（比如价格打码工具）
+          // 会和本应用共用同一个存储空间，它们占满了，本应用一样存不进去。
+          others.sort((a, b) => b.bytes - a.bytes);
+          const otherTotal = others.reduce((s, x) => s + x.bytes, 0);
+          let msg = '⚠️ 浏览器存储已用 ' + usedMB.toFixed(1) + 'MB，快满了！超过上限后你的改动就存不进去了。';
+          if (otherTotal > dataBytes) {
+            const top = others.slice(0, 2).map(x => x.key.split('-')[0] + '（' + (x.bytes / MB).toFixed(1) + 'MB）').join('、');
+            msg += '\n\n🔎 主要是【同一个网站下的其他应用】占的：' + top +
+                   '\n注意：同域名的不同网页共用同一个存储空间，所以别的应用占满了，这个系统一样存不进去。' +
+                   '\n建议：去那个页面把不需要的方案/设置删掉。';
+          } else {
+            msg += '\n\n🔎 主要是本系统的订单数据占的（多半是带图片的订单）。';
+          }
+          msg += '\n\n请先点下面按钮导出备份。';
+          showStorageAlert(msg);
         } else if (used < 3 * MB) {
           _storageWarned = false;                   // 降下来了就重置，下次还能再提醒
         }
       } catch (e) { /* 查询失败就算了，不影响主流程 */ }
+    }
+    // 判断某个 localStorage 键是不是"本应用自己的"
+    const OWN_KEYS = [
+      STORAGE_KEY, 'dailyCounters', 'collapsedDefaults', 'orderManualOrder', 'orderSortMode',
+      'mobileViewMode', 'compactFieldKeys', 'cardFieldKeys', 'tableFieldKeys', 'orderOcrRules',
+      'batchCalcPresets', 'batchCalcHistory', 'lastMonthlyBackupKey', 'om_localDirty',
+      'om_autosync', 'om_lastSyncAt', 'om_lastExportAt', 'om_sw_reloaded'
+    ];
+    function isOwnKey(k) {
+      return OWN_KEYS.indexOf(k) >= 0 || k.indexOf('orderManager') === 0;
     }
     // 存储相关的严重提示：用不会被忽略的方式显示
     function showStorageAlert(msg) {
@@ -6414,7 +6491,7 @@
     refreshBackupBanner();
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.09.13-12'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.09.13-13'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
