@@ -293,7 +293,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-14</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-15</button>
      <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
      <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
@@ -5158,6 +5158,27 @@
     }
 
     // ============ 行内编辑器 ============
+    // 把"这次编辑的目标"直接绑到编辑器内的各个控件上（dataset），
+    // 这样即使全局状态被清空，点击依然准确知道该改哪个订单的哪个字段。
+    function applyInlineEditTarget(editor) {
+      if (!editor) editor = document.getElementById('inlineEditor');
+      if (!editor) return;
+      const oid = editor.dataset.orderId || '';
+      const fk = editor.dataset.fieldKey || '';
+      const bt = editor.dataset.batch || '0';
+      // 选项 chip
+      Array.prototype.forEach.call(editor.querySelectorAll('[data-ie-opt]'), function (el) {
+        el.dataset.ieOrder = oid;
+        el.dataset.ieField = fk;
+        el.dataset.ieBatch = bt;
+      });
+      // 默认值 chip
+      Array.prototype.forEach.call(editor.querySelectorAll('[data-ie-default]'), function (el) {
+        el.dataset.ieOrder = oid;
+        el.dataset.ieField = fk;
+      });
+    }
+
     function startInlineEdit(cellEl, orderId, fieldKey) {
       const field = fieldsConfig.find(f => f.key === fieldKey);
       if (!field) return;
@@ -5165,18 +5186,25 @@
       if (field.type === 'formula') return;
       const order = orders.find(o => o.id === orderId);
       if (!order) return;
+      // 关键：把这次编辑的"目标"写进编辑器元素本身（editor.dataset），
+      // 不再只依赖全局变量。否则一旦全局状态被清空（比如手指点到遮罩触发了关闭），
+      // 选项点击就会【静默失效】—— 数据和提示不一致，用户看到"改了"其实没改。
+      const editor = document.getElementById('inlineEditor');
+      editor.dataset.orderId = orderId;
+      editor.dataset.fieldKey = fieldKey;
+      const batch = selectedOrders.size > 0 && selectedOrders.has(orderId) && field.type !== 'imageText';
+      editor.dataset.batch = batch ? '1' : '0';
+      // 全局变量只作为"键盘回车保存"的兼容路径
       currentInlineFieldKey = fieldKey;
       currentInlineOrderId = orderId;
-      // 批量同步模式：有选中订单且点击的订单在选中集合中 → 修改同步到所有选中订单（图片字段除外）
-      batchSyncMode = selectedOrders.size > 0 && selectedOrders.has(orderId) && field.type !== 'imageText';
+      batchSyncMode = batch;
 
       const val = order[fieldKey];
-      const editor = document.getElementById('inlineEditor');
       editor.style.display = 'block';
       let editorHtml = '';
       editorHtml += renderInlineEditor(field, val);
       // 批量模式提示
-      if (batchSyncMode) {
+      if (batch) {
         editorHtml = '<div style="margin-bottom:8px;padding:6px 10px;background:#e6f4ff;border:1px solid #91caff;border-radius:6px;font-size:12px;color:#0958d9;">📋 批量同步：修改将应用到已选中的 <b>' + selectedOrders.size + '</b> 个订单</div>' + editorHtml;
       }
       const isSelectWithOptions = field.type === 'select' && field.options && field.options.length > 0;
@@ -5187,6 +5215,7 @@
       }
       editorHtml += '</div>';
       editor.innerHTML = editorHtml;
+      applyInlineEditTarget(editor);   // 把目标传给编辑器内部所有按钮，彻底不依赖全局
 
       // 定位编辑器
       const rect = cellEl.getBoundingClientRect();
@@ -5246,7 +5275,7 @@
           html += '<div class="chips-list" style="flex-wrap:wrap;">';
           field.options.forEach(o => {
             const active = (val === o.value) ? ' chip-active' : '';
-            html += '<div class="chip' + active + '" onclick="ieSelectOption(\'' + escapeJs(o.value) + '\')">' + escapeHtml(o.label) + '</div>';
+            html += '<div class="chip' + active + '" data-ie-opt="1" onclick="event.stopPropagation();ieSelectOption(\'' + escapeJs(o.value) + '\', this)">' + escapeHtml(o.label) + '</div>';
           });
           html += '</div>';
         }
@@ -5275,10 +5304,10 @@
         html += '<div class="defaults-picker" data-picker="' + escapeAttr(field.key) + '">';
         html += '<div class="chips-list"' + (isCollapsed ? ' style="display:none;"' : '') + '>';
         manual.forEach(v => {
-          html += '<div class="chip" onclick="ieUseDefault(\'' + escapeJs(String(v)) + '\')">' + escapeHtml(String(v)) + '</div>';
+          html += '<div class="chip" data-ie-default="1" onclick="ieUseDefault(\'' + escapeJs(String(v)) + '\', this)">' + escapeHtml(String(v)) + '</div>';
         });
         history.forEach(v => {
-          html += '<div class="chip chip-yellow" onclick="ieUseDefault(\'' + escapeJs(String(v)) + '\')">' + escapeHtml(String(v)) + '</div>';
+          html += '<div class="chip chip-yellow" data-ie-default="1" onclick="ieUseDefault(\'' + escapeJs(String(v)) + '\', this)">' + escapeHtml(String(v)) + '</div>';
         });
         html += '<button class="chip-manage-btn" onclick="manageDefaultsClick(\'' + escapeJs(field.key) + '\')">管理…</button>';
         html += '</div>';
@@ -5335,11 +5364,22 @@
       if (fileInput) fileInput.value = '';
       document.getElementById('ieImgB64').value = '';
     }
-    function ieUseDefault(v) {
+    function ieUseDefault(v, el) {
+      // 兼容两种调用：带元素（新写法，靠 dataset 定位）/ 不带元素（旧写法，靠全局变量）
+      let oid = null, fk = null;
+      if (el && el.dataset) { oid = el.dataset.ieOrder || null; fk = el.dataset.ieField || null; }
       const txtInput = document.getElementById('ieTxtInput');
       const mainInput = document.getElementById('ieInput');
       if (txtInput) { txtInput.value = v; txtInput.focus(); }
       if (mainInput) { mainInput.value = v; mainInput.focus(); }
+      // 把目标也记到编辑器上，供"确定"按钮使用
+      const editor = document.getElementById('inlineEditor');
+      if (editor && oid && fk) {
+        editor.dataset.orderId = oid;
+        editor.dataset.fieldKey = fk;
+        currentInlineOrderId = oid;
+        currentInlineFieldKey = fk;
+      }
     }
 
     // 新增/编辑订单弹窗：点击默认值填入对应输入框
@@ -5351,7 +5391,12 @@
     }
 
     function closeInlineEditor() {
-      document.getElementById('inlineEditor').style.display = 'none';
+      const ed = document.getElementById('inlineEditor');
+      ed.style.display = 'none';
+      ed.innerHTML = '';                       // 清掉残留内容，避免旧按钮被再次点到
+      delete ed.dataset.orderId;               // 清掉编辑目标，防止"关掉之后还在改数据"
+      delete ed.dataset.fieldKey;
+      delete ed.dataset.batch;
       document.getElementById('inlineMask').classList.remove('show');
       currentInlineFieldKey = null;
       currentInlineOrderId = null;
@@ -5359,12 +5404,37 @@
     }
 
     // 下拉选择直接点击生效（批量模式下同步到所有选中订单）
-    function ieSelectOption(value) {
-      const field = fieldsConfig.find(f => f.key === currentInlineFieldKey);
-      if (!field) return;
-      const order = orders.find(o => o.id === currentInlineOrderId);
-      if (!order) return;
-      if (batchSyncMode) {
+    // 重要：目标订单/字段/是否批量，优先从点击元素自己的 dataset 里取，
+    // 全局变量只作兜底 —— 否则全局状态一旦被清空就会【静默失效】。
+    function ieSelectOption(value, el) {
+      let fieldKey = null, orderId = null, batch = null;
+      if (el && el.dataset) {
+        fieldKey = el.dataset.ieField || null;
+        orderId = el.dataset.ieOrder || null;
+        batch = el.dataset.ieBatch === '1';
+      }
+      if (!fieldKey) {
+        const ed = document.getElementById('inlineEditor');
+        if (ed && ed.dataset && ed.dataset.fieldKey) fieldKey = ed.dataset.fieldKey;
+      }
+      if (!orderId) {
+        const ed = document.getElementById('inlineEditor');
+        if (ed && ed.dataset && ed.dataset.orderId) orderId = ed.dataset.orderId;
+      }
+      if (batch === null) {
+        const ed = document.getElementById('inlineEditor');
+        batch = !!(ed && ed.dataset && ed.dataset.batch === '1');
+      }
+      // 最后才用全局变量兜底
+      if (!fieldKey) fieldKey = currentInlineFieldKey;
+      if (!orderId) orderId = currentInlineOrderId;
+      if (batch === null) batch = batchSyncMode;
+
+      const field = fieldsConfig.find(f => f.key === fieldKey);
+      if (!field) { showToast('⚠️ 编辑目标丢失，请重新点一下单元格'); return; }
+      const order = orders.find(o => o.id === orderId);
+      if (!order) { showToast('⚠️ 找不到该订单，请重新点一下'); return; }
+      if (batch) {
         applyBatchSync(field.key, value);
         return;
       }
@@ -5373,6 +5443,7 @@
       saveData('行内编辑: ' + field.label);
       afterCellEdit(order.id);
       closeInlineEditor();
+      showToast('✅ 已修改「' + field.label + '」');
     }
 
     // 改完一个单元格后的最小刷新：只重画那一行 + 统计栏走增量
@@ -5422,10 +5493,19 @@
       if (ev) {
         ev.stopPropagation ? ev.stopPropagation() : (ev.cancelBubble = true);
       }
-      const field = fieldsConfig.find(f => f.key === currentInlineFieldKey);
-      if (!field) return;
-      const order = orders.find(o => o.id === currentInlineOrderId);
-      if (!order) return;
+      // 目标优先从编辑器自己的 dataset 取（不依赖全局状态，避免静默失效）
+      const ed = document.getElementById('inlineEditor');
+      const fieldKey = (ed && ed.dataset && ed.dataset.fieldKey) || currentInlineFieldKey;
+      const orderId  = (ed && ed.dataset && ed.dataset.orderId) || currentInlineOrderId;
+      const batch    = (ed && ed.dataset) ? (ed.dataset.batch === '1') : batchSyncMode;
+      const field = fieldsConfig.find(f => f.key === fieldKey);
+      if (!field) { showToast('⚠️ 编辑目标丢失，请重新点一下单元格'); return; }
+      const order = orders.find(o => o.id === orderId);
+      if (!order) { showToast('⚠️ 找不到该订单，请重新点一下'); return; }
+      // 同步回全局，供内部其它逻辑使用
+      currentInlineFieldKey = fieldKey;
+      currentInlineOrderId = orderId;
+      batchSyncMode = batch;
 
       let newVal;
       if (field.type === 'imageText') {
@@ -6729,7 +6809,7 @@
     bootstrap();
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.09.13-14'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.09.13-15'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
