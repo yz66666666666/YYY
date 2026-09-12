@@ -293,7 +293,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-11</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-12</button>
      <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
      <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
@@ -661,8 +661,9 @@
       <button class="btn btn-secondary" onclick="syncFromGist()">📥 从云端同步</button>
       <button class="btn btn-primary" onclick="syncToGist()">📤 同步到云端</button>
     </div>
-    <div style="margin-top:12px;padding-top:12px;border-top:1px solid #e5e7eb;display:flex;gap:8px;justify-content:center;">
-      <button class="btn btn-secondary btn-sm" onclick="exportLocalData()">💾 导出本地数据</button>
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid #e5e7eb;display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
+      <button class="btn btn-secondary btn-sm" onclick="showStoragePanel()">💾 存储占用 / 救急</button>
+      <button class="btn btn-secondary btn-sm" onclick="exportLocalData()">⬇️ 导出本地数据</button>
       <button class="btn btn-secondary btn-sm" onclick="document.getElementById('importFileInput').click()">📂 导入本地数据</button>
       <input type="file" id="importFileInput" accept=".json" style="display:none" onchange="importLocalData(event)">
     </div>
@@ -1304,6 +1305,98 @@
           tx.onerror = function() { resolve(); };
         } catch(e) { resolve(); }
       });
+    }
+
+    // ==================== 存储救急工具 ====================
+    // 浏览器存储满时，改动就存不进去了。这个工具：统计占用明细 + 一键清理所有备份。
+    function storageReport() {
+      const MB = 1024 * 1024;
+      const out = { localStorage: [], idb: [], totalLocal: 0 };
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          const v = localStorage.getItem(k) || '';
+          const bytes = (k.length + v.length) * 2;
+          out.totalLocal += bytes;
+          out.localStorage.push({ key: k, bytes: bytes });
+        }
+        out.localStorage.sort((a, b) => b.bytes - a.bytes);
+      } catch (e) {}
+      // 主数据里图片占多少（看有多少 imageText 字段带图）
+      try {
+        let imgCount = 0, imgBytes = 0;
+        const imgFields = fieldsConfig.filter(f => f.type === 'imageText').map(f => f.key);
+        orders.forEach(o => {
+          imgFields.forEach(k => {
+            const v = o[k];
+            const img = (v && typeof v === 'object') ? v.image : '';
+            if (img && img.length > 100) { imgCount++; imgBytes += img.length * 2; }
+          });
+        });
+        out.images = { count: imgCount, bytes: imgBytes };
+      } catch (e) { out.images = { count: 0, bytes: 0 }; }
+      return out;
+    }
+
+    // 一键清空全部自动备份（不影响订单本身）
+    async function clearAllBackups() {
+      const stores = BACKUP_STORES.slice();
+      for (let i = 0; i < stores.length; i++) {
+        await clearBackups(stores[i]);
+      }
+      return true;
+    }
+
+    function showStoragePanel() {
+      const rep = storageReport();
+      const MB = 1024 * 1024;
+      let html = '<div style="font-size:13px;line-height:1.8;color:#333;">';
+      html += '<div style="margin-bottom:10px;padding:8px 10px;background:#fff1f0;border:1px solid #ffccc7;border-radius:6px;color:#a8071a;">';
+      html += '浏览器存储已用 <b>' + (rep.totalLocal / MB).toFixed(2) + ' MB</b>（上限通常约 5MB）。超过上限后，你的改动就存不进去了。';
+      html += '</div>';
+
+      if (rep.images && rep.images.count > 0) {
+        html += '<div style="margin-bottom:10px;">📷 带图片的订单：<b>' + rep.images.count + '</b> 处，图片合计约 <b>' +
+                (rep.images.bytes / MB).toFixed(2) + ' MB</b>' +
+                (rep.images.bytes / MB > 2 ? ' —— <b style="color:#a8071a;">这是主要占用来源</b>' : '') + '</div>';
+      }
+
+      html += '<div style="margin-bottom:6px;font-weight:600;">占用明细（前 6 项）：</div>';
+      html += '<div style="font-family:monospace;font-size:12px;background:#fafafa;border-radius:6px;padding:8px;margin-bottom:12px;word-break:break-all;">';
+      rep.localStorage.slice(0, 6).forEach(item => {
+        const name = item.key === STORAGE_KEY ? '订单主数据' : item.key;
+        html += '· ' + escapeHtml(name) + '：' + (item.bytes / MB).toFixed(2) + ' MB<br>';
+      });
+      html += '</div>';
+
+      html += '<div style="margin-bottom:10px;padding:8px 10px;background:#f6ffed;border:1px solid #b7eb8f;border-radius:6px;color:#237804;">';
+      html += '✅ <b>自动备份不占这里的空间</b>（存在 IndexedDB 里，容量大得多），所以「快捷操作」里的清理不会影响你的自动备份。';
+      html += '</div>';
+
+      html += '<div style="margin-bottom:6px;font-weight:600;">建议按顺序做：</div>';
+      html += '<ol style="margin:0;padding-left:20px;">';
+      html += '<li><b>先导出</b>：点「💾 导出本地数据」，存一份到手机（这是你的保险）</li>';
+      html += '<li><b>再清理</b>：如果主要是图片占的，需要删除一些带图订单，或让我把图片改成存到 IndexedDB</li>';
+      html += '</ol>';
+      html += '</div>';
+
+      let panel = document.getElementById('storagePanel');
+      if (!panel) {
+        panel = document.createElement('div');
+        panel.id = 'storagePanel';
+        panel.className = 'modal-mask';
+        panel.innerHTML = '<div class="modal modal-md">' +
+          '<div class="modal-hdr"><h3>💾 存储占用</h3><button class="close-x" onclick="document.getElementById(\'storagePanel\').classList.remove(\'show\')">×</button></div>' +
+          '<div class="modal-body" id="storagePanelBody"></div>' +
+          '<div class="modal-ftr">' +
+            '<button class="btn btn-secondary" onclick="exportLocalData()">💾 立即导出</button>' +
+            '<button class="btn btn-secondary" onclick="document.getElementById(\'storagePanel\').classList.remove(\'show\')">关闭</button>' +
+          '</div></div>';
+        document.body.appendChild(panel);
+      }
+      document.getElementById('storagePanelBody').innerHTML = html;
+      panel.classList.add('show');
+      return rep;
     }
 
     // 获取当前完整数据快照
@@ -2419,19 +2512,22 @@
     // 一旦发生，用户之后所有改动都存不进去 —— 所以必须抓住并大声提醒。
     let _storageWarned = false;
     let _lastQuotaCheck = 0;
+    let _storageFailed = false;      // 上次写入是否失败（供调用方判断"要不要谎报成功"）
     function safeSetItem(key, value) {
       try {
         localStorage.setItem(key, value);
         checkStorageQuota(value);
+        _storageFailed = false;
         return true;
       } catch (e) {
+        _storageFailed = true;
         const isQuota = (e && (
           e.name === 'QuotaExceededError' ||
           e.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
           e.code === 22 || e.code === 1014
         ));
         showStorageAlert(isQuota
-          ? '⚠️ 浏览器存储空间已满，刚才的改动没能保存！请立刻「导出本地数据」备份，并清理历史备份或带图片的订单。'
+          ? '⚠️ 浏览器存储空间已满，刚才的改动没能保存！请点下面的按钮看占用明细并导出备份。'
           : '⚠️ 数据保存失败：' + (e && e.message ? e.message : e) + '。请立刻导出备份。');
         return false;
       }
@@ -2480,6 +2576,15 @@
       const body = document.createElement('div');
       body.innerText = msg;
       el.insertBefore(body, el.firstChild);
+      // 附带一个"看占用明细"按钮，方便用户搞清楚到底什么占了空间
+      if (!el.querySelector('.sa-more')) {
+        const more = document.createElement('button');
+        more.className = 'btn btn-secondary btn-sm sa-more';
+        more.style.cssText = 'margin-top:8px;';
+        more.innerText = '看占用明细 / 导出备份';
+        more.onclick = function () { showStoragePanel(); };
+        el.appendChild(more);
+      }
       console.error('[存储告警]', msg);
     }
 
@@ -5033,15 +5138,28 @@
     function applyBatchSync(fieldKey, newVal) {
       const field = fieldsConfig.find(f => f.key === fieldKey);
       const targets = orders.filter(o => selectedOrders.has(o.id));
+      if (targets.length === 0) { showToast('⚠️ 没有选中任何订单'); closeInlineEditor(); return; }
       const changed = targets.filter(o => (o[fieldKey] === undefined ? '' : o[fieldKey]) !== newVal).length;
       // 统计栏增量：批量改动同样只记差值，不重算全部
       statEditBegin();
       targets.forEach(o => { statEditSnapshot(o); o[fieldKey] = newVal; pushToDefaults(o); });
       statEditCommit(targets);
-      saveData('批量修改 ' + (field ? field.label : fieldKey) + '（' + changed + ' 个订单）');
+      // 先刷新界面（不管能不能存进去，界面都必须反映真实数据）
+      invalidateRenderCaches();
       render();
       closeInlineEditor();
-      showToast('✅ 已同步修改 ' + changed + ' 个订单的「' + (field ? field.label : fieldKey) + '」');
+      // 再保存。saveData 返回 false 表示没存进去（存储满），这时不能谎报成功。
+      const before = _storageFailed;
+      saveData('批量修改 ' + (field ? field.label : fieldKey) + '（' + targets.length + ' 个订单）');
+      const saved = !_storageFailed || _storageFailed === before;
+      const label = field ? field.label : fieldKey;
+      if (saved) {
+        showToast('✅ 已同步修改 ' + targets.length + ' 个订单的「' + label + '」' +
+          (changed < targets.length ? '（其中 ' + changed + ' 个值有变化）' : ''));
+      } else {
+        // 存储满了：界面已更新，但没存住 → 必须说清楚，别让用户以为已经保存
+        showToast('⚠️ 界面已更新，但【存不进去】！浏览器存储已满，请立刻导出备份并清理历史备份');
+      }
     }
 
     function saveInlineEdit(ev) {
@@ -6296,7 +6414,7 @@
     refreshBackupBanner();
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.09.13-11'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.09.13-12'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
