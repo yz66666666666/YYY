@@ -293,7 +293,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-15</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-16</button>
      <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
      <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
@@ -2927,6 +2927,8 @@
       _renderListCache = null;
       _formulaCache = null;
       _filterSigCache = null;
+      // 数据变了 → 标记"需要原地重画一次"，否则批量改值后屏幕不会更新
+      _needRepaint = true;
       // 统计栏不清空旧值（先显示旧数字，避免闪白），只把"数据版本号"+1，
       // 让 renderStats 安排一次后台空闲重算 + 显示转圈。
       bumpStatsGen();
@@ -2981,7 +2983,13 @@
         // 筛选条件/视图/数据条数变了 → 从头开始一个新窗口
         _winStart = 0;
         renderWindow(0, windowSize(), null);
-      } else {        // 条件没变（例如只是改了某一格、拖了一下顺序）→ DOM 保持原样，不重画
+      } else if (_needRepaint) {
+        // ★ 数据被改过、但"筛选条件"没变（例如批量改了一个字段的值）：
+        //   必须重画当前窗口，否则屏幕上还是旧值 —— 用户会以为"没生效"，
+        //   直到退出重进（重新读存储）才看到变化。
+        _needRepaint = false;
+        renderWindow(_winStart, _winCount || windowSize(), null);
+      } else {        // 什么都没变（例如只是滚动/切视图内的无关操作）→ DOM 保持原样，不重画
         _winStart = Math.min(_winStart, Math.max(0, _currentList.length - 1));
       }
       if (PERF_ON) { const t = performance.now(); perfMark('③列表', t - _t1); _t1 = t; }
@@ -3456,6 +3464,10 @@
     let _winCount = 0;               // 当前窗口渲染了多少行
     let _currentList = [];           // 当前过滤+排序后的完整列表（纯数据）
     let _listSig = '';               // 列表签名：变了才需要从第一批重来
+    // 数据被改动过、但筛选条件没变时，需要"原地重画一次当前窗口"。
+    // 不加这个标记的话，批量改字段值会出现"数据改了、屏幕没变"，
+    // 用户以为没生效，直到退出重进才看到（真实故障，2026-09-13 修）。
+    let _needRepaint = false;
     let _rowH = 0;                   // 实测行高（每行高度不一致时取平均）
     let _spacerTop = null, _spacerBot = null;
 
@@ -6809,7 +6821,7 @@
     bootstrap();
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.09.13-15'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.09.13-16'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
