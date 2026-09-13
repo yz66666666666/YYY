@@ -94,6 +94,13 @@
   .mode-config-list { border: 1px solid #eee; border-radius: 6px; padding: 4px 10px; max-height: 220px; overflow-y: auto; }
   /* 手动排序拖拽状态 */
   .dragging-order { opacity: 0.5; background: #e6f7ff !important; }
+  /* 从批量计算器"定位到原订单"时，让那一行闪一下，方便一眼找到 */
+  @keyframes locate-flash {
+    0%   { background: #fffbe6; box-shadow: inset 0 0 0 2px #ffc53d; }
+    50%  { background: #fff1b8; box-shadow: inset 0 0 0 2px #fa8c16; }
+    100% { background: #fffbe6; box-shadow: inset 0 0 0 2px #ffc53d; }
+  }
+  .locate-flash, .locate-flash td { animation: locate-flash 0.8s ease-in-out 3; }
   body.dragging-active { user-select: none; -webkit-user-select: none; cursor: move; }
   body.dragging-active * { cursor: move !important; }
   @media (max-width: 768px) {
@@ -293,7 +300,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-17</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-18</button>
      <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
      <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
@@ -4842,6 +4849,10 @@
       setBatchCalcMode('normal');
       document.getElementById('batchCalcCount').innerText = count;
       document.getElementById('batchCalcResults').innerHTML = '';
+      // 每次重新打开都重置排序/分布图状态，避免上次的筛选把结果挡住
+      _bcSortKey = 'result'; _bcSortDir = -1;
+      _bcRangeFilter = null;
+      _bcFormula = ''; _bcNote = '';
       const historyEl = document.getElementById('batchHistory');
       if (historyEl) historyEl.dataset.expanded = 'false';
       renderCalcPresets();
@@ -5063,6 +5074,411 @@
       }
       return rules;
     }
+    // ==================== 批量计算结果：汇总 / 排序 / 分布图 ====================
+    // 设计目标（用户反馈）：
+    //   1) 最大/最小不能只给一个数字，要说清"是哪一单、为什么"（带关键字段值 + 定位按钮）
+    //   2) 明细表要能按任意列排序（售价高→低、进价高→低…）
+    //   3) 要有分布柱状图，一眼看出结果的分布形态（段数可调，默认10段）
+    //   4) 百分比可切换：按订单数占比 / 按金额占比
+    //   5) 算不出结果的订单不参与统计，但必须明确告知数量
+    let _bcSortKey = 'result';       // 当前排序依据
+    let _bcSortDir = -1;             // -1 降序，1 升序
+    let _bcBins = 10;                // 分布图段数
+    let _bcPctMode = 'count';        // 'count' 按订单数 | 'sum' 按金额
+    let _bcRangeFilter = null;       // {lo, hi} 点柱子后的区间筛选
+    let _bcFormula = '';             // 当前公式（渲染时用）
+    let _bcNote = '';                // 分组模式的说明文案
+
+    function bcFmtNum(v) {
+      if (typeof v !== 'number' || !isFinite(v)) return String(v);
+      const r = Math.round(v * 100) / 100;
+      return String(r);
+    }
+    function bcOrderLabel(o) {
+      const f = fieldsConfig.find(x => x.key === 'orderNo');
+      const v = f ? getDisplayText(f, o.orderNo) : (o.orderNo || '');
+      return v ? String(v) : String(o.id || '');
+    }
+    function bcCustomer(o) {
+      const f = fieldsConfig.find(x => x.type === 'text' && x.key !== 'orderNo' && !x.hidden);
+      return f ? String(getDisplayText(f, o[f.key]) || '') : '';
+    }
+    // 从公式文本里找出它引用了哪些字段（中文名或英文 key 都支持）
+    function bcUsedFieldKeys(formula) {
+      const keys = [];
+      const f = String(formula || '');
+      fieldsConfig.forEach(x => {
+        if (x.type === 'formula') return;
+        const byKey = x.key && new RegExp('(^|[^0-9A-Za-z_])' + x.key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '([^0-9A-Za-z_]|$)').test(f);
+        const byLabel = x.label && f.indexOf(x.label) >= 0;
+        if (byKey || byLabel) keys.push(x.key);
+      });
+      return keys;
+    }
+    // 分组公式模式下，把所有用到的子公式合起来找依赖字段
+    function bcUsedFieldKeysFromData(data) {
+      const set = {};
+      data.forEach(d => {
+        if (!args_hasResult(d)) return;
+        bcUsedFieldKeys(d.formula).forEach(k => { set[k] = true; });
+      });
+      return Object.keys(set);
+    }
+    function args_hasResult(d) { return d.result !== '' && d.result !== null && d.result !== undefined; }
+
+    // 排序：点击表头切换 降序/升序
+    function batchCalcSortBy(key) {
+      if (_bcSortKey === key) {
+        _bcSortDir = -_bcSortDir;
+      } else {
+        _bcSortKey = key;
+        _bcSortDir = -1;   // 新列默认从高到低
+      }
+      renderBatchCalcResults();
+    }
+    function batchCalcSetBins(n) {
+      _bcBins = Math.max(2, Math.min(30, parseInt(n, 10) || 10));
+      _bcRangeFilter = null;
+      renderBatchCalcResults();
+    }
+    function batchCalcSetPct(mode) {
+      _bcPctMode = (mode === 'sum') ? 'sum' : 'count';
+      renderBatchCalcResults();
+    }
+    function batchCalcFilterRange(lo, hi) {
+      _bcRangeFilter = { lo: lo, hi: hi };
+      renderBatchCalcResults();
+    }
+    function batchCalcClearFilter() {
+      _bcRangeFilter = null;
+      renderBatchCalcResults();
+    }
+
+    // 把某个订单在列表里高亮定位（从计算器跳回列表）
+    function locateOrderInList(orderId) {
+      const o = orders.find(x => x.id === orderId);
+      if (!o) { showToast('⚠️ 找不到该订单（可能已被删除）'); return; }
+      // 关掉计算器弹窗
+      document.getElementById('batchCalcModal').classList.remove('show');
+      // 清掉可能把它挡住的搜索/筛选
+      const kwEl = document.getElementById('searchInput');
+      const sfEl = document.getElementById('statusFilter');
+      let cleared = false;
+      if (kwEl && kwEl.value.trim()) { kwEl.value = ''; cleared = true; }
+      if (sfEl && sfEl.value) { sfEl.value = ''; cleared = true; }
+      _filterSigCache = null; _renderListCache = null;
+      const list = getFilteredOrders();
+      const idx = list.findIndex(x => x.id === orderId);
+      if (idx < 0) { showToast('⚠️ 该订单不在当前列表中'); return; }
+      _currentList = list;
+      _listSig = '';                       // 强制重新渲染窗口
+      _winStart = Math.max(0, Math.min(idx - 3, Math.max(0, list.length - 10)));
+      render();
+      // 滚到那一行并闪一下
+      setTimeout(function () {
+        const sel = '#ordersTbody tr[data-id="' + orderId + '"], #compactList .compact-row[data-id="' + orderId + '"], #cardList .card[data-id="' + orderId + '"]';
+        const row = document.querySelector(sel);
+        if (!row) { showToast('ℹ️ 已定位到订单，请手动往下找一下'); return; }
+        try { row.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {}
+        row.classList.add('locate-flash');
+        setTimeout(function () { row.classList.remove('locate-flash'); }, 2600);
+      }, 120);
+      if (cleared) showToast('ℹ️ 已清空搜索/筛选，方便你看到这一单');
+    }
+
+    // 取出一条数据在某个排序键上的"可比较值"
+    function bcSortValue(d, key) {
+      if (key === 'result') {
+        return args_hasResult(d) ? Number(d.result) : null;
+      }
+      if (key === 'orderNo') return bcOrderLabel(d.order);
+      const f = fieldsConfig.find(x => x.key === key);
+      const raw = d.order[key];
+      if (f && f.type === 'number') {
+        const n = Number(raw);
+        return (raw === '' || raw === null || raw === undefined || isNaN(n)) ? null : n;
+      }
+      return (raw === undefined || raw === null) ? '' : String(raw);
+    }
+    function bcSortData(data) {
+      const key = _bcSortKey, dir = _bcSortDir;
+      const arr = data.slice();
+      arr.sort(function (a, b) {
+        const va = bcSortValue(a, key), vb = bcSortValue(b, key);
+        // 空值一律排到最后
+        const na = (va === null || va === ''), nb = (vb === null || vb === '');
+        if (na && nb) return 0;
+        if (na) return 1;
+        if (nb) return -1;
+        if (typeof va === 'number' && typeof vb === 'number') return dir * (va - vb);
+        return dir * String(va).localeCompare(String(vb));
+      });
+      return arr;
+    }
+
+    // 直方图：把 [min,max] 平均切成 N 段，统计每段的订单数与金额
+    function bcBuildBins(validData, n) {
+      const nums = validData.map(d => Number(d.result)).filter(v => isFinite(v));
+      if (nums.length === 0) return { bins: [], lo: 0, hi: 0 };
+      let lo = Math.min.apply(null, nums);
+      let hi = Math.max.apply(null, nums);
+      if (lo === hi) {           // 所有结果一样 → 造一个能容纳它的区间
+        const pad = Math.abs(lo) > 0 ? Math.abs(lo) * 0.05 : 0.5;
+        lo = lo - pad; hi = hi + pad;
+      }
+      const width = (hi - lo) / n;
+      const totalSumAbs = nums.reduce((s, v) => s + v, 0);
+      const bins = [];
+      for (let i = 0; i < n; i++) {
+        const bLo = lo + width * i;
+        const bHi = (i === n - 1) ? hi : (lo + width * (i + 1));
+        bins.push({ lo: bLo, hi: bHi, count: 0, sum: 0, isLast: (i === n - 1) });
+      }
+      validData.forEach(d => {
+        const v = Number(d.result);
+        if (!isFinite(v)) return;
+        let i = Math.floor((v - lo) / width);
+        if (i < 0) i = 0;
+        if (i >= n) i = n - 1;
+        // 边界值归到左边一段（第一段除外），避免落在缝里
+        if (i > 0 && Math.abs(v - bins[i].lo) < 1e-12) i = i - 1;
+        bins[i].count++;
+        bins[i].sum += v;
+      });
+      return { bins: bins, lo: lo, hi: hi, totalCount: nums.length, totalSum: totalSumAbs };
+    }
+
+    // 渲染分布图（横条，手机上也能看；点柱子可筛选）
+    function bcHistogramHtml() {
+      const data = batchCalcDetailData;
+      const valid = data.filter(args_hasResult);
+      const totalAll = data.length;
+      let html = '<div style="margin-top:14px;padding:10px 12px;border:1px solid #e8e8e8;border-radius:8px;background:#fff;">';
+      html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">';
+      html += '<b style="font-size:13px;">📈 结果分布</b>';
+      html += '<span style="font-size:12px;color:#888;">共 ' + valid.length + ' 个有效结果';
+      if (totalAll > valid.length) html += '（另有 ' + (totalAll - valid.length) + ' 单算不出，不参与统计）';
+      html += '</span>';
+      html += '<span style="flex:1;"></span>';
+      // 百分比口径切换
+      html += '<span style="font-size:12px;color:#888;">百分比按</span>';
+      html += '<button class="btn btn-sm ' + (_bcPctMode === 'count' ? 'btn-primary' : 'btn-secondary') + '" onclick="batchCalcSetPct(\'count\')">订单数</button>';
+      html += '<button class="btn btn-sm ' + (_bcPctMode === 'sum' ? 'btn-primary' : 'btn-secondary') + '" onclick="batchCalcSetPct(\'sum\')">金额</button>';
+      // 段数调整
+      html += '<span style="font-size:12px;color:#888;margin-left:6px;">段数</span>';
+      html += '<button class="btn btn-secondary btn-sm" onclick="batchCalcSetBins(' + (_bcBins - 1) + ')">−</button>';
+      html += '<b style="font-size:13px;min-width:20px;text-align:center;">' + _bcBins + '</b>';
+      html += '<button class="btn btn-secondary btn-sm" onclick="batchCalcSetBins(' + (_bcBins + 1) + ')">+</button>';
+      html += '</div>';
+
+      if (valid.length === 0) {
+        html += '<div style="color:#999;font-size:13px;padding:10px;text-align:center;">没有可统计的结果</div></div>';
+        return html;
+      }
+      const info = bcBuildBins(valid, _bcBins);
+      const maxPct = Math.max.apply(null, info.bins.map(b => {
+        const pct = (_bcPctMode === 'count')
+          ? (info.totalCount ? b.count / info.totalCount * 100 : 0)
+          : (info.totalSum ? Math.abs(b.sum) / Math.abs(info.totalSum) * 100 : 0);
+        return pct;
+      }).concat([1]));
+
+      html += '<div style="font-size:12px;color:#666;margin-bottom:6px;">区间范围：<b>' + bcFmtNum(info.lo) + '</b> ～ <b>' + bcFmtNum(info.hi) + '</b>' +
+              '　（每段宽度 ' + bcFmtNum((info.hi - info.lo) / _bcBins) + '）</div>';
+      html += '<div>';
+      info.bins.forEach(function (b) {
+        const pct = (_bcPctMode === 'count')
+          ? (info.totalCount ? (b.count / info.totalCount * 100) : 0)
+          : (info.totalSum ? (b.sum / info.totalSum * 100) : 0);
+        const w = Math.max(0, Math.min(100, Math.abs(pct) / maxPct * 100));
+        const active = _bcRangeFilter && _bcRangeFilter.lo === b.lo;
+        const color = b.sum < 0 ? '#ff7875' : '#69b1ff';
+        html += '<div onclick="batchCalcFilterRange(' + b.lo + ',' + b.hi + ')" ' +
+          'style="display:flex;align-items:center;gap:8px;padding:3px 4px;border-radius:4px;cursor:pointer;' +
+          (active ? 'background:#e6f4ff;outline:1px solid #91caff;' : '') + '">' +
+          '<span style="flex:0 0 118px;font-size:11px;color:#666;text-align:right;white-space:nowrap;">' +
+            bcFmtNum(b.lo) + ' ~ ' + bcFmtNum(b.hi) + '</span>' +
+          '<span style="flex:1;min-width:0;height:16px;background:#f5f7fa;border-radius:3px;overflow:hidden;">' +
+            '<span style="display:block;height:100%;width:' + w.toFixed(1) + '%;background:' + color + ';border-radius:3px;"></span>' +
+          '</span>' +
+          '<span style="flex:0 0 132px;font-size:11px;color:#333;white-space:nowrap;">' +
+            '<b>' + pct.toFixed(1) + '%</b>　' + b.count + ' 单</span>' +
+          '</div>';
+        });
+      html += '</div>';
+      if (_bcRangeFilter) {
+        html += '<div style="margin-top:8px;text-align:center;">' +
+          '<button class="btn btn-secondary btn-sm" onclick="batchCalcClearFilter()">✕ 显示全部（当前只显示一个区间）</button></div>';
+      }
+      html += '<div style="margin-top:6px;font-size:11px;color:#999;">💡 点某一段的横条 → 下方明细只显示那个区间；' +
+              '百分比口径："订单数"看有多少单落在这一段，"金额"看这一段贡献了多少总额。</div>';
+      html += '</div>';
+      return html;
+    }
+
+    // 渲染整块计算结果（汇总 + 分布图 + 明细表）
+    function renderBatchCalcResults() {
+      const box = document.getElementById('batchCalcResults');
+      if (!box) return;
+      const data = batchCalcDetailData;
+      if (!data || data.length === 0) { box.innerHTML = ''; return; }
+
+      const valid = data.filter(args_hasResult);
+      const invalid = data.filter(d => !args_hasResult(d));
+      let sum = 0;
+      valid.forEach(d => { sum += Number(d.result) || 0; });
+      const validCount = valid.length;
+      const avg = validCount > 0 ? Math.round(sum / validCount * 100) / 100 : 0;
+      const nums = valid.map(d => Number(d.result));
+      const maxVal = nums.length ? Math.max.apply(null, nums) : 0;
+      const minVal = nums.length ? Math.min.apply(null, nums) : 0;
+      const maxItem = valid.find(d => Number(d.result) === maxVal);
+      const minItem = valid.find(d => Number(d.result) === minVal);
+      const usedKeys = bcUsedFieldKeysFromData(data);
+
+      // ---------- ① 汇总 ----------
+      let html = '<div style="padding:12px;background:#f6ffed;border:1px solid #b7eb8f;border-radius:8px;font-size:14px;">';
+      html += '<div style="margin-bottom:4px;">📊 <b>汇总</b>（共 ' + validCount + ' 个有效结果）</div>';
+      html += '<div style="display:flex;gap:20px;flex-wrap:wrap;">' +
+        '<span>求和：<b style="color:#52c41a;">' + bcFmtNum(Math.round(sum * 100) / 100) + '</b></span>' +
+        '<span>平均：<b style="color:#1677ff;">' + avg + '</b></span>' +
+        '</div></div>';
+
+      // 最值明细：说清"是哪一单、为什么"
+      function extremeCard(item, value, isMax) {
+        if (!item) return '';
+        const o = item.order;
+        let vals = '';
+        usedKeys.forEach(function (k) {
+          const f = fieldsConfig.find(x => x.key === k);
+          if (!f) return;
+          const raw = o[k];
+          const empty = (raw === '' || raw === null || raw === undefined);
+          vals += '<span style="margin-right:10px;white-space:nowrap;">' + escapeHtml(f.label) + ' ' +
+            (empty ? '<b style="color:#cf1322;">缺</b>' : escapeHtml(String(getDisplayText(f, raw)))) + '</span>';
+        });
+        const cust = bcCustomer(o);
+        return '<div style="margin-top:8px;padding:10px 12px;border:1px solid ' + (isMax ? '#ffd591' : '#ffccc7') + ';background:' + (isMax ? '#fff7e6' : '#fff1f0') + ';border-radius:8px;">' +
+          '<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">' +
+            '<span style="font-size:14px;">' + (isMax ? '🏆 最大' : '🔻 最小') + '</span>' +
+            '<b style="font-size:17px;color:' + (isMax ? '#d46b08' : '#cf1322') + ';">' + escapeHtml(String(value)) + '</b>' +
+            '<span style="font-size:13px;color:#333;">订单 <b>' + escapeHtml(bcOrderLabel(o)) + '</b></span>' +
+            (cust ? '<span style="font-size:13px;color:#666;">' + escapeHtml(cust) + '</span>' : '') +
+          '</div>' +
+          (vals ? '<div style="margin-top:4px;font-size:12px;color:#555;">' + vals + '</div>' : '') +
+          '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;">' +
+            '<button class="btn btn-secondary btn-sm" onclick="showBatchCalcDetailById(\'' + escapeJs(o.id) + '\')">📖 看计算过程</button>' +
+            '<button class="btn btn-primary btn-sm" onclick="locateOrderInList(\'' + escapeJs(o.id) + '\')">📍 定位到原订单</button>' +
+          '</div>' +
+        '</div>';
+      }
+      html += extremeCard(maxItem, bcFmtNum(maxVal), true);
+      html += extremeCard(minItem, bcFmtNum(minVal), false);
+
+      // 算不出结果的提醒（用户要求明确告知，但不参与统计）
+      if (invalid.length > 0) {
+        html += '<div style="margin-top:8px;padding:8px 12px;border:1px solid #ffe58f;background:#fffbe6;border-radius:8px;font-size:13px;color:#ad6800;">' +
+          '⚠️ 有 <b>' + invalid.length + '</b> 单算不出结果（不参与上面的统计和分布图）' +
+          '<div style="margin-top:4px;font-size:12px;color:#8c6d1f;">常见原因：公式里用到的字段没填、字段名写错、数值填成了文字。</div>' +
+          '<div style="margin-top:6px;"><button class="btn btn-secondary btn-sm" onclick="batchCalcShowInvalid()">列出这些订单</button></div>' +
+          '</div>';
+      }
+
+      // ---------- ② 分布图 ----------
+      html += bcHistogramHtml();
+
+      // ---------- ③ 明细表（可排序） ----------
+      let listData = bcSortData(data);
+      if (_bcRangeFilter) {
+        const lo = _bcRangeFilter.lo, hi = _bcRangeFilter.hi;
+        listData = listData.filter(function (d) {
+          if (!args_hasResult(d)) return false;
+          const v = Number(d.result);
+          return v >= lo && v <= (hi + 1e-9);
+        });
+      }
+      const arrow = function (k) {
+        if (_bcSortKey !== k) return '<span style="color:#bbb;">↕</span>';
+        return _bcSortDir < 0 ? '<span style="color:#1a73e8;">▼</span>' : '<span style="color:#1a73e8;">▲</span>';
+      };
+      let th = '<tr style="background:#f5f5f5;">';
+      th += '<th style="padding:6px 8px;text-align:left;border:1px solid #e8e8e8;cursor:pointer;white-space:nowrap;" onclick="batchCalcSortBy(\'orderNo\')">订单编号 ' + arrow('orderNo') + '</th>';
+      usedKeys.forEach(function (k) {
+        const f = fieldsConfig.find(x => x.key === k);
+        if (!f) return;
+        th += '<th style="padding:6px 8px;text-align:left;border:1px solid #e8e8e8;cursor:pointer;white-space:nowrap;" onclick="batchCalcSortBy(\'' + escapeJs(k) + '\')">' +
+              escapeHtml(f.label) + ' ' + arrow(k) + '</th>';
+      });
+      th += '<th style="padding:6px 8px;text-align:right;border:1px solid #e8e8e8;cursor:pointer;white-space:nowrap;background:#f0f5ff;" onclick="batchCalcSortBy(\'result\')">计算结果 ' + arrow('result') + '</th>';
+      th += '<th style="padding:6px 8px;border:1px solid #e8e8e8;width:44px;"></th></tr>';
+
+      let rows = '';
+      listData.forEach(function (d) {
+        const o = d.order;
+        const ok = args_hasResult(d);
+        const v = ok ? Number(d.result) : null;
+        const isMax = ok && v === maxVal;
+        const isMin = ok && v === minVal;
+        const bg = isMax ? '#fff7e6' : (isMin ? '#fff1f0' : '');
+        rows += '<tr style="' + (bg ? 'background:' + bg + ';' : '') + '">';
+        rows += '<td style="padding:5px 8px;border:1px solid #e8e8e8;white-space:nowrap;">' + escapeHtml(bcOrderLabel(o)) + '</td>';
+        usedKeys.forEach(function (k) {
+          const f = fieldsConfig.find(x => x.key === k);
+          if (!f) return;
+          const raw = o[k];
+          const empty = (raw === '' || raw === null || raw === undefined);
+          rows += '<td style="padding:5px 8px;border:1px solid #e8e8e8;white-space:nowrap;' + (empty ? 'color:#cf1322;' : '') + '">' +
+                  (empty ? '缺' : escapeHtml(String(getDisplayText(f, raw)))) + '</td>';
+        });
+        rows += '<td style="padding:5px 8px;border:1px solid #e8e8e8;text-align:right;white-space:nowrap;font-weight:600;color:' +
+                (ok ? '#722ed1' : '#bbb') + ';">' + (ok ? escapeHtml(String(d.result)) : '—') + (isMax ? ' 🏆' : (isMin ? ' 🔻' : '')) + '</td>';
+        rows += '<td style="padding:5px 8px;border:1px solid #e8e8e8;text-align:center;">' +
+                '<button class="btn btn-secondary btn-sm" onclick="showBatchCalcDetailById(\'' + escapeJs(o.id) + '\')" title="查看计算过程">📖</button></td>';
+        rows += '</tr>';
+      });
+      const filteredTip = _bcRangeFilter
+        ? '（已按区间筛选：' + bcFmtNum(_bcRangeFilter.lo) + ' ~ ' + bcFmtNum(_bcRangeFilter.hi) + '，共 ' + listData.length + ' 单）'
+        : '';
+      html += '<div style="margin-top:14px;font-size:13px;color:#333;">' +
+        '<b>📋 订单明细</b> <span style="color:#888;font-size:12px;">共 ' + data.length + ' 单' + filteredTip + '　点表头可排序</span></div>';
+      html += '<div style="margin-top:6px;max-height:46vh;overflow:auto;border:1px solid #eee;border-radius:6px;">' +
+        '<table style="width:100%;border-collapse:collapse;font-size:12px;">' + th + rows + '</table></div>';
+
+      box.innerHTML = html;
+    }
+    // 列出"算不出结果"的订单，方便排查数据问题
+    function batchCalcShowInvalid() {
+      const invalid = batchCalcDetailData.filter(d => !args_hasResult(d));
+      if (invalid.length === 0) { showToast('ℹ️ 没有算不出的订单'); return; }
+      let html = '<div style="font-size:13px;color:#333;line-height:1.8;">以下 <b>' + invalid.length + '</b> 单算不出结果：</div>';
+      html += '<div style="max-height:50vh;overflow:auto;margin-top:8px;border:1px solid #eee;border-radius:6px;">';
+      html += '<table style="width:100%;border-collapse:collapse;font-size:12px;"><tr style="background:#fafafa;">' +
+        '<th style="padding:6px 8px;border:1px solid #eee;text-align:left;">订单编号</th>' +
+        '<th style="padding:6px 8px;border:1px solid #eee;text-align:left;">用到的字段值</th>' +
+        '<th style="padding:6px 8px;border:1px solid #eee;width:60px;"></th></tr>';
+      const keys = bcUsedFieldKeysFromData(batchCalcDetailData);
+      invalid.forEach(function (d) {
+        const o = d.order;
+        let vals = '';
+        keys.forEach(function (k) {
+          const f = fieldsConfig.find(x => x.key === k);
+          if (!f) return;
+          const raw = o[k];
+          const empty = (raw === '' || raw === null || raw === undefined);
+          vals += '<span style="margin-right:8px;white-space:nowrap;">' + escapeHtml(f.label) + ' ' +
+            (empty ? '<b style="color:#cf1322;">缺</b>' : escapeHtml(String(getDisplayText(f, raw)))) + '</span>';
+        });
+        html += '<tr><td style="padding:5px 8px;border:1px solid #eee;white-space:nowrap;">' + escapeHtml(bcOrderLabel(o)) + '</td>' +
+          '<td style="padding:5px 8px;border:1px solid #eee;">' + vals + '</td>' +
+          '<td style="padding:5px 8px;border:1px solid #eee;text-align:center;">' +
+          '<button class="btn btn-secondary btn-sm" onclick="showBatchCalcDetailById(\'' + escapeJs(o.id) + '\')">📖</button></td></tr>';
+      });
+      html += '</table></div>';
+      document.getElementById('formulaDetailTitle').innerText = '⚠️ 算不出结果的订单';
+      document.getElementById('formulaDetailSteps').innerHTML = html;
+      document.getElementById('formulaDetailModal').classList.add('show');
+    }
+
     function execBatchCalcGroup() {
       const fieldKey = document.getElementById('batchGroupField').value;
       if (!fieldKey) { showToast('⚠️ 请先选择分组字段'); return; }
@@ -5071,14 +5487,10 @@
       const rules = collectBatchGroupRules();
       const defaultFormula = document.getElementById('batchGroupDefaultFormula').value.trim();
       const selectedList = getSelectedOrders();
-      if (selectedList.length === 0) return;
-      let tableHtml = '<table style="width:100%;border-collapse:collapse;font-size:12px;">';
-      tableHtml += '<tr style="background:#f5f5f5;"><th style="padding:4px 8px;text-align:left;border:1px solid #e8e8e8;">订单</th><th style="padding:4px 8px;text-align:left;border:1px solid #e8e8e8;">' + escapeHtml(fieldDef.label) + '</th><th style="padding:4px 8px;text-align:right;border:1px solid #e8e8e8;">计算结果</th><th style="padding:4px 8px;border:1px solid #e8e8e8;width:40px;"></th></tr>';
-      let sum = 0;
-      let validCount = 0;
-      const results = [];
+      if (selectedList.length === 0) { showToast('⚠️ 没有选中订单'); return; }
+
       batchCalcDetailData = [];
-      selectedList.forEach((o, idx) => {
+      selectedList.forEach(function (o) {
         const gv = String(o[fieldKey] === null || o[fieldKey] === undefined ? '' : o[fieldKey]);
         let formula = rules[gv];
         if (!formula || !String(formula).trim()) formula = defaultFormula;
@@ -5086,44 +5498,17 @@
         if (formula && String(formula).trim()) {
           result = evalFormula({ type: 'formula', formula: String(formula) }, o);
         }
-        results.push(result);
         batchCalcDetailData.push({
           order: o,
           formula: String(formula || ''),
-          note: '按「' + escapeHtml(fieldDef.label) + '」= ' + (gv === '' ? '（空）' : escapeHtml(getDisplayText(fieldDef, o[fieldKey]))) + '，使用该分组公式'
+          result: result,
+          note: '按「' + fieldDef.label + '」= ' + (gv === '' ? '（空）' : getDisplayText(fieldDef, o[fieldKey])) + '，使用该分组公式'
         });
-        const orderLabel = escapeHtml(getDisplayText(fieldsConfig[0] || {label:'订单'}, o[fieldsConfig[0] ? fieldsConfig[0].key : 'orderNo']) || o.id);
-        const gvDisplay = escapeHtml(getDisplayText(fieldDef, o[fieldKey]) || '—');
-        let displayResult;
-        if (result === '' || result === null || result === undefined) {
-          displayResult = '<span style="color:#bbb;">—</span>';
-        } else {
-          sum += Number(result) || 0;
-          validCount++;
-          displayResult = '<b style="color:#722ed1;">' + escapeHtml(String(result)) + '</b>';
-        }
-        tableHtml += '<tr><td style="padding:4px 8px;border:1px solid #e8e8e8;">' + orderLabel + '</td>' +
-          '<td style="padding:4px 8px;border:1px solid #e8e8e8;">' + gvDisplay + '</td>' +
-          '<td style="padding:4px 8px;border:1px solid #e8e8e8;text-align:right;">' + displayResult + '</td>' +
-          '<td style="padding:4px 8px;border:1px solid #e8e8e8;text-align:center;"><button class="btn btn-secondary btn-sm" onclick="showBatchCalcDetail(' + idx + ')" title="查看计算过程">📖</button></td></tr>';
       });
-      tableHtml += '</table>';
-      const validResults = results.filter(r => r !== '' && r !== null && r !== undefined).map(r => Number(r));
-      const avg = validCount > 0 ? (Math.round(sum / validCount * 100) / 100) : 0;
-      const maxVal = validResults.length > 0 ? Math.max(...validResults) : 0;
-      const minVal = validResults.length > 0 ? Math.min(...validResults) : 0;
-      // 汇总卡片置顶，明细默认收起
-      let html = '<div style="padding:12px;background:#f6ffed;border:1px solid #b7eb8f;border-radius:6px;font-size:14px;">' +
-        '<div style="margin-bottom:4px;">📊 <b>汇总</b>（共 ' + validCount + ' 个有效结果）</div>' +
-        '<div style="display:flex;gap:24px;flex-wrap:wrap;">' +
-        '<span>求和：<b style="color:#52c41a;">' + (Math.round(sum * 100) / 100) + '</b></span>' +
-        '<span>平均：<b style="color:#1677ff;">' + avg + '</b></span>' +
-        '<span>最大：<b style="color:#fa8c16;">' + maxVal + '</b></span>' +
-        '<span>最小：<b style="color:#fa541c;">' + minVal + '</b></span>' +
-        '</div></div>';
-      html += '<div style="margin-top:10px;font-size:13px;color:#1677ff;cursor:pointer;user-select:none;" onclick="toggleBatchDetail()"><span id="batchDetailArrow">▶</span> 查看订单明细（' + selectedList.length + ' 条）</div>';
-      html += '<div id="batchDetailWrap" style="display:none;margin-top:8px;overflow-x:auto;">' + tableHtml + '</div>';
-      document.getElementById('batchCalcResults').innerHTML = html;
+      _bcFormula = defaultFormula;
+      _bcNote = '分组公式（按「' + fieldDef.label + '」）';
+      _bcRangeFilter = null;
+      renderBatchCalcResults();
     }
 
     function execBatchCalc() {
@@ -5131,60 +5516,22 @@
       const formulaStr = document.getElementById('batchCalcFormula').value.trim();
       if (!formulaStr) return;
       const selectedList = getSelectedOrders();
-      if (selectedList.length === 0) return;
+      if (selectedList.length === 0) { showToast('⚠️ 没有选中订单'); return; }
       saveCalcHistory(formulaStr);
       renderCalcHistory();
-      // 构造一个临时 formula 字段来复用 evalFormula
       const tempField = { type: 'formula', formula: formulaStr };
-      batchCalcDetailData = [];
-      let tableHtml = '<table style="width:100%;border-collapse:collapse;font-size:12px;">';
-      tableHtml += '<tr style="background:#f5f5f5;"><th style="padding:4px 8px;text-align:left;border:1px solid #e8e8e8;">订单</th><th style="padding:4px 8px;text-align:right;border:1px solid #e8e8e8;">计算结果</th><th style="padding:4px 8px;border:1px solid #e8e8e8;width:40px;"></th></tr>';
-      let sum = 0;
-      let validCount = 0;
-      const results = [];
-      selectedList.forEach((o, idx) => {
-        const result = evalFormula(tempField, o);
-        results.push(result);
-        batchCalcDetailData.push({ order: o, formula: formulaStr, note: '' });
-        const orderLabel = escapeHtml(getDisplayText(fieldsConfig[0] || {label:'订单'}, o[fieldsConfig[0] ? fieldsConfig[0].key : 'orderNo']) || o.id);
-        let displayResult;
-        if (result === '' || result === null || result === undefined) {
-          displayResult = '<span style="color:#bbb;">—</span>';
-        } else {
-          sum += Number(result) || 0;
-          validCount++;
-          displayResult = '<b style="color:#722ed1;">' + escapeHtml(String(result)) + '</b>';
-        }
-        tableHtml += '<tr><td style="padding:4px 8px;border:1px solid #e8e8e8;">' + orderLabel + '</td>' +
-          '<td style="padding:4px 8px;border:1px solid #e8e8e8;text-align:right;">' + displayResult + '</td>' +
-          '<td style="padding:4px 8px;border:1px solid #e8e8e8;text-align:center;"><button class="btn btn-secondary btn-sm" onclick="showBatchCalcDetail(' + idx + ')" title="查看计算过程">📖</button></td></tr>';
+      batchCalcDetailData = selectedList.map(function (o) {
+        return {
+          order: o,
+          formula: formulaStr,
+          result: evalFormula(tempField, o),
+          note: ''
+        };
       });
-      tableHtml += '</table>';
-      const validResults = results.filter(r => r !== '' && r !== null && r !== undefined).map(r => Number(r));
-      const avg = validCount > 0 ? (Math.round(sum / validCount * 100) / 100) : 0;
-      const maxVal = validResults.length > 0 ? Math.max(...validResults) : 0;
-      const minVal = validResults.length > 0 ? Math.min(...validResults) : 0;
-      // 汇总卡片置顶，明细默认收起
-      let html = '<div style="padding:12px;background:#f6ffed;border:1px solid #b7eb8f;border-radius:6px;font-size:14px;">' +
-        '<div style="margin-bottom:4px;">📊 <b>汇总</b>（共 ' + validCount + ' 个有效结果）</div>' +
-        '<div style="display:flex;gap:24px;flex-wrap:wrap;">' +
-        '<span>求和：<b style="color:#52c41a;">' + (Math.round(sum * 100) / 100) + '</b></span>' +
-        '<span>平均：<b style="color:#1677ff;">' + avg + '</b></span>' +
-        '<span>最大：<b style="color:#fa8c16;">' + maxVal + '</b></span>' +
-        '<span>最小：<b style="color:#fa541c;">' + minVal + '</b></span>' +
-        '</div></div>';
-      html += '<div style="margin-top:10px;font-size:13px;color:#1677ff;cursor:pointer;user-select:none;" onclick="toggleBatchDetail()"><span id="batchDetailArrow">▶</span> 查看订单明细（' + selectedList.length + ' 条）</div>';
-      html += '<div id="batchDetailWrap" style="display:none;margin-top:8px;overflow-x:auto;">' + tableHtml + '</div>';
-      document.getElementById('batchCalcResults').innerHTML = html;
-    }
-
-    function toggleBatchDetail() {
-      const wrap = document.getElementById('batchDetailWrap');
-      const arrow = document.getElementById('batchDetailArrow');
-      if (!wrap) return;
-      const show = wrap.style.display === 'none';
-      wrap.style.display = show ? '' : 'none';
-      if (arrow) arrow.innerText = show ? '▼' : '▶';
+      _bcFormula = formulaStr;
+      _bcNote = '';
+      _bcRangeFilter = null;
+      renderBatchCalcResults();
     }
 
     // ============ 行内编辑器 ============
@@ -5907,12 +6254,19 @@
       renderFormulaDetailModal(field.label + ' 计算过程', d.note, d.steps, d.result);
     }
     // 批量计算详情：临时公式（普通/分组模式）展示某个订单的计算过程
-    let batchCalcDetailData = []; // [{order, formula, note}]
+    let batchCalcDetailData = []; // [{order, formula, result, note}]
     function showBatchCalcDetail(i) {
       const item = batchCalcDetailData[i];
       if (!item) return;
       const d = explainFormula({ type: 'formula', formula: item.formula }, item.order);
       renderFormulaDetailModal('计算过程', item.note || d.note, d.steps, d.result);
+    }
+    // 按订单 id 查计算过程（排序/筛选后下标会变，所以用 id 定位才可靠）
+    function showBatchCalcDetailById(orderId) {
+      const item = batchCalcDetailData.find(function (d) { return d.order && d.order.id === orderId; });
+      if (!item) { showToast('⚠️ 找不到这单的计算数据'); return; }
+      const d = explainFormula({ type: 'formula', formula: item.formula }, item.order);
+      renderFormulaDetailModal('计算过程 · ' + bcOrderLabel(item.order), item.note || d.note, d.steps, d.result);
     }
     function renderFormulaDetailModal(title, note, steps, result) {
       document.getElementById('formulaDetailTitle').innerText = title;
@@ -6839,7 +7193,7 @@
     bootstrap();
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.09.13-17'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.09.13-18'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
