@@ -293,7 +293,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-16</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-17</button>
      <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
      <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
@@ -2264,7 +2264,9 @@
       const n = Number(v);
       return (isNaN(n) || !isFinite(n)) ? null : n;
     }
-    // 取一条订单在某个统计项上的"贡献值"
+    // 取一条订单在某个统计项上的"数值贡献"（求和/平均用）
+    // 注意：文字类字段（如 status='pending'）解析不出数字时返回 0 而不是 null，
+    // 否则"按字段筛选计数"会把这类订单整条跳过、计数永远为 0。
     function statValueOf(stat, order, memo) {
       if (!stat.field) return null;
       const f = fieldsConfig.find(x => x.key === stat.field);
@@ -2273,25 +2275,41 @@
         if (memo) {
           const r = memo[f.key];
           if (r === '' || r === null || r === undefined) return null;
-          return validNumber(r);
+          const n = validNumber(r);
+          return n === null ? 0 : n;
         }
         const r = evalFormula(f, order);
-        return (r === '' || r === null || r === undefined) ? null : validNumber(r);
+        if (r === '' || r === null || r === undefined) return null;
+        const n = validNumber(r);
+        return n === null ? 0 : n;
       }
-      return validNumber(order[stat.field]);
+      const n = validNumber(order[stat.field]);
+      return n === null ? 0 : n;
     }
     function statBucketOf(stat, order) {
       if (!stat.field) return null;
       const raw = order[stat.field];
       return (raw === undefined || raw === null || raw === '') ? '\u0000EMPTY' : String(raw);
     }
+    // 这条订单在统计字段上"有没有值"（用于筛选计数，文字/数字都支持）
+    function statHasValue(stat, order) {
+      if (!stat.field) return false;
+      const raw = order[stat.field];
+      return !(raw === undefined || raw === null || raw === '');
+    }
     // 算一条订单对某个统计项的"增量"，并写进累加器
     function statApply(acc, stat, order, memo, sign) {
       const v = statValueOf(stat, order, memo);
       if (stat.type === 'count') { acc.count += sign; return; }
       if (stat.type === 'count_filtered') {
-        if (v === null) return;                       // 字段无值的订单不计入（与原逻辑一致）
-        if (v !== validNumber(stat.filterValue)) return;
+        // "按字段筛选计数"比的是【字段原始值 vs 配置的筛选值】，两边都按字符串比。
+        // 注意：不能走 validNumber 那种数字解析 —— 像 status = 'pending'/'未发货'/'已完成'
+        // 这类文字值会被解析成 null，导致永远不相等、计数永远显示 0（曾因此出过故障）。
+        if (!statHasValue(stat, order)) return;       // 字段没值的订单不计入
+        const raw = order[stat.field];
+        const rawStr = (raw === undefined || raw === null) ? '' : String(raw);
+        const wantStr = (stat.filterValue === undefined || stat.filterValue === null) ? '' : String(stat.filterValue);
+        if (rawStr !== wantStr) return;
         acc.map['\u0001'] = (acc.map['\u0001'] || 0) + sign;
         return;
       }
@@ -6821,7 +6839,7 @@
     bootstrap();
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.09.13-16'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.09.13-17'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
