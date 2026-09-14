@@ -234,6 +234,23 @@
     border-radius: 50%; animation: stats-spin 0.7s linear infinite; display: inline-block;
   }
   @keyframes stats-spin { to { transform: rotate(360deg); } }
+  /* 统计范围切换按钮（和"重算中"提示并排放在右上角） */
+  .stats-scope {
+    position: absolute; right: 10px; top: 6px; z-index: 6;
+    display: inline-flex; align-items: center; gap: 4px;
+    background: rgba(255,255,255,0.94); border: 1px solid #d6e4ff; border-radius: 12px;
+    padding: 3px 10px; font-size: 11px; color: #1a73e8; cursor: pointer;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06); user-select: none;
+  }
+  .stats-scope:hover { background: #eef4ff; }
+  /* 手机上：统计卡片横向排列、可左右滑动，别竖着占一大堆高度 */
+  @media (max-width: 768px) {
+    .stats-bar { flex-wrap: nowrap; overflow-x: auto; padding: 10px 10px 12px; gap: 8px; -webkit-overflow-scrolling: touch; }
+    .stat-card { flex: 0 0 auto; min-width: 130px; padding: 10px 12px; gap: 8px; }
+    .stat-icon { width: 34px; height: 34px; font-size: 18px; border-radius: 8px; }
+    .stat-info .stat-val { font-size: 19px; }
+    .stat-info .stat-label { font-size: 11px; }
+  }
   .stat-card { display: flex; align-items: center; gap: 12px; padding: 14px 18px; background: #fff; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); min-width: 160px; flex: 1; }
   .stat-icon { width: 42px; height: 42px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 22px; }
   .stat-icon.blue   { background: #e6f0ff; color: #1a73e8; }
@@ -300,7 +317,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-18</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-19</button>
      <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
      <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
@@ -2162,6 +2179,85 @@
       return out;
     }
 
+    // ==================== 统计栏统计范围：跟随筛选 / 全部 ====================
+    // 用户要求：切到"已发货"时，统计栏应该统计已发货那部分，而不是永远统计全部。
+    // 但有时又想看全局，所以做成可切换（默认跟随筛选），并且会记住选择。
+    let statsSyncMode = 'filtered';   // 'filtered' 跟随搜索/筛选 | 'all' 永远统计全部
+    let _filteredAccCache = null;     // {sig, acc}
+    let _filteredStatsSig = '';
+
+    function statsScopeLabel() {
+      return statsSyncMode === 'filtered'
+        ? ('📊 当前筛选（' + ((_currentList && _currentList.length) || 0) + ' 单）')
+        : '📊 全部订单';
+    }
+    function toggleStatsScope() {
+      statsSyncMode = (statsSyncMode === 'filtered') ? 'all' : 'filtered';
+      setSetting('om_statsScope', statsSyncMode);
+      _statsValuesCache = null; _statsDataGen = -1;   // 强制下次重新算
+      _filteredAccCache = null; _filteredStatsSig = '';
+      render();
+      showToast(statsSyncMode === 'filtered'
+        ? '📊 统计栏改为：跟随当前筛选'
+        : '📊 统计栏改为：永远统计全部订单');
+    }
+    function loadStatsScope() {
+      const v = getSetting('om_statsScope', 'filtered');
+      statsSyncMode = (v === 'all') ? 'all' : 'filtered';
+    }
+    // 当前筛选条件的签名（用于缓存"筛选后的统计"）
+    function statsFilterSig() {
+      const kwEl = document.getElementById('searchInput');
+      const sfEl = document.getElementById('statusFilter');
+      const sfdEl = document.getElementById('searchFieldSel');
+      return [
+        orders.length,
+        kwEl ? kwEl.value : '',
+        sfEl ? sfEl.value : '',
+        sfdEl ? sfdEl.value : '',
+        JSON.stringify(statsConfig)
+      ].join('\u0001');
+    }
+    // 按"当前筛选后的订单"算一次统计（有缓存，筛选条件不变就不会重算）
+    function statsForFilteredList() {
+      const sig = statsFilterSig();
+      if (_filteredAccCache && _filteredStatsSig === sig) return _filteredAccCache.acc;
+      const list = getFilteredOrders();
+      const accs = [];
+      const n = statsConfig.length;
+      for (let i = 0; i < n; i++) accs.push({ count: 0, sum: 0, cnt: 0, map: {} });
+      for (let j = 0; j < list.length; j++) {
+        for (let i = 0; i < n; i++) statApplyFiltered(accs[i], statsConfig[i], list[j]);
+      }
+      _filteredAccCache = { sig: sig, acc: accs };
+      _filteredStatsSig = sig;
+      return accs;
+    }
+    // 只累加、不做"减号"（筛选统计每次从头算，逻辑更简单也不容易错）
+    function statApplyFiltered(acc, stat, order) {
+      if (stat.type === 'count') { acc.count++; return; }
+      if (stat.type === 'count_filtered') {
+        if (!statHasValue(stat, order)) return;
+        const raw = order[stat.field];
+        const rawStr = (raw === undefined || raw === null) ? '' : String(raw);
+        const wantStr = (stat.filterValue === undefined || stat.filterValue === null) ? '' : String(stat.filterValue);
+        if (rawStr === wantStr) acc.map['\u0001'] = (acc.map['\u0001'] || 0) + 1;
+        return;
+      }
+      const v = statValueOf(stat, order, null);
+      if (v === null) return;
+      if (stat.type === 'sum' || stat.type === 'sum_status') { acc.sum += v; return; }
+      if (stat.type === 'avg') { acc.sum += v; acc.cnt++; }
+    }
+    // 累加器 → 显示值数组
+    function statsAccToValuesOf(accs) {
+      const out = [];
+      statsConfig.forEach((s, i) => {
+        out.push({ label: s.label, val: String(statResult(accs[i], s)), icon: s.icon || '📊', color: s.color || 'blue' });
+      });
+      return out;
+    }
+
     function statsHtml(vals) {
       let html = '';
       vals.forEach(v => {
@@ -2175,8 +2271,22 @@
 
     function paintStats() {
       const bar = document.getElementById('statsBar');
-      if (!bar || !_statsValuesCache) return;
-      const html = statsHtml(_statsValuesCache);
+      if (!bar) return;
+      let list = _currentList;
+      if (!list || !list.length) { list = getFilteredOrders(); _currentList = list; }
+      let vals = null;
+      if (statsSyncMode === 'filtered' && list && list.length !== orders.length) {
+        // 有筛选 → 统计"筛选后的那部分"（用户要求：切到"已发货"就统计已发货）
+        vals = statsAccToValuesOf(statsForFilteredList());
+      } else if (_statsValuesCache) {
+        vals = _statsValuesCache;
+      } else {
+        return;
+      }
+      let html = statsHtml(vals);
+      // 右下角一个"统计范围"切换按钮（点它可在 跟随筛选／全部订单 之间切换）
+      html += '<div class="stats-scope" onclick="toggleStatsScope()" title="点击切换统计范围">' +
+              escapeHtml(statsScopeLabel()) + '</div>';
       if (bar._lastHtml !== html) { bar.innerHTML = html; bar._lastHtml = html; }
     }
 
@@ -3004,6 +3114,12 @@
         else if (mobileViewMode === 'card') renderCards();
         else renderCompactList();
         _winStart = 0; _winCount = 0;
+      } else if (_winOverride != null) {
+        // 有"跳到某一行"的请求（例如从批量计算器定位到原订单）→ 用它作为窗口起点
+        const want = Math.max(0, Math.min(_winOverride, Math.max(0, _currentList.length - 1)));
+        _winOverride = null;
+        _winStart = want;
+        renderWindow(want, windowSize(), null);
       } else if (condChanged) {
         // 筛选条件/视图/数据条数变了 → 从头开始一个新窗口
         _winStart = 0;
@@ -3493,6 +3609,9 @@
     // 不加这个标记的话，批量改字段值会出现"数据改了、屏幕没变"，
     // 用户以为没生效，直到退出重进才看到（真实故障，2026-09-13 修）。
     let _needRepaint = false;
+    // "跳转到某一行"的请求：render 时优先采用它作为窗口起点，
+    // 否则 render 里"条件变了就 _winStart = 0"会把跳转目标冲掉（定位功能曾因此失效）。
+    let _winOverride = null;
     let _rowH = 0;                   // 实测行高（每行高度不一致时取平均）
     let _spacerTop = null, _spacerBot = null;
 
@@ -5166,23 +5285,36 @@
       let cleared = false;
       if (kwEl && kwEl.value.trim()) { kwEl.value = ''; cleared = true; }
       if (sfEl && sfEl.value) { sfEl.value = ''; cleared = true; }
+      if (typeof statsSyncMode !== 'undefined' && statsSyncMode === 'filtered') {
+        _statsValuesCache = null; _statsDataGen = -1;   // 统计栏跟着回到"全部"
+      }
       _filterSigCache = null; _renderListCache = null;
       const list = getFilteredOrders();
       const idx = list.findIndex(x => x.id === orderId);
       if (idx < 0) { showToast('⚠️ 该订单不在当前列表中'); return; }
       _currentList = list;
       _listSig = '';                       // 强制重新渲染窗口
-      _winStart = Math.max(0, Math.min(idx - 3, Math.max(0, list.length - 10)));
+      // ★ 用"窗口跳转请求"而不是直接设 _winStart：render 内部遇到条件变化会把
+      //   _winStart 重置为 0，直接设会被冲掉（这就是之前定位失效的原因）
+      _winOverride = Math.max(0, Math.min(idx - 3, Math.max(0, list.length - 10)));
+      _needRepaint = true;
       render();
       // 滚到那一行并闪一下
       setTimeout(function () {
         const sel = '#ordersTbody tr[data-id="' + orderId + '"], #compactList .compact-row[data-id="' + orderId + '"], #cardList .card[data-id="' + orderId + '"]';
         const row = document.querySelector(sel);
         if (!row) { showToast('ℹ️ 已定位到订单，请手动往下找一下'); return; }
-        try { row.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {}
+        // 自己算滚动位置（scrollIntoView 在虚拟滚动下不太可靠）
+        try {
+          const rect = row.getBoundingClientRect();
+          const target = window.scrollY + rect.top - (window.innerHeight / 2) + (rect.height / 2);
+          window.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+        } catch (e) {
+          try { row.scrollIntoView({ block: 'center' }); } catch (e2) {}
+        }
         row.classList.add('locate-flash');
-        setTimeout(function () { row.classList.remove('locate-flash'); }, 2600);
-      }, 120);
+        setTimeout(function () { row.classList.remove('locate-flash'); }, 3200);
+      }, 260);   // 等虚拟滚动重画完再找行
       if (cleared) showToast('ℹ️ 已清空搜索/筛选，方便你看到这一单');
     }
 
@@ -5293,16 +5425,20 @@
         const w = Math.max(0, Math.min(100, Math.abs(pct) / maxPct * 100));
         const active = _bcRangeFilter && _bcRangeFilter.lo === b.lo;
         const color = b.sum < 0 ? '#ff7875' : '#69b1ff';
+        // 布局：第一行「区间 + 百分比 + 单数」，第二行「横条占满整行」
+        // 这样窄屏（手机）也不用左右滚动
         html += '<div onclick="batchCalcFilterRange(' + b.lo + ',' + b.hi + ')" ' +
-          'style="display:flex;align-items:center;gap:8px;padding:3px 4px;border-radius:4px;cursor:pointer;' +
+          'style="padding:5px 6px;border-radius:6px;cursor:pointer;' +
           (active ? 'background:#e6f4ff;outline:1px solid #91caff;' : '') + '">' +
-          '<span style="flex:0 0 118px;font-size:11px;color:#666;text-align:right;white-space:nowrap;">' +
-            bcFmtNum(b.lo) + ' ~ ' + bcFmtNum(b.hi) + '</span>' +
-          '<span style="flex:1;min-width:0;height:16px;background:#f5f7fa;border-radius:3px;overflow:hidden;">' +
-            '<span style="display:block;height:100%;width:' + w.toFixed(1) + '%;background:' + color + ';border-radius:3px;"></span>' +
-          '</span>' +
-          '<span style="flex:0 0 132px;font-size:11px;color:#333;white-space:nowrap;">' +
-            '<b>' + pct.toFixed(1) + '%</b>　' + b.count + ' 单</span>' +
+          '<div style="display:flex;align-items:baseline;gap:6px;font-size:12px;">' +
+            '<span style="color:#666;white-space:nowrap;">' + bcFmtNum(b.lo) + ' ~ ' + bcFmtNum(b.hi) + '</span>' +
+            '<span style="flex:1;min-width:4px;"></span>' +
+            '<b style="color:#333;white-space:nowrap;">' + pct.toFixed(1) + '%</b>' +
+            '<span style="color:#888;white-space:nowrap;min-width:52px;text-align:right;">' + b.count + ' 单</span>' +
+          '</div>' +
+          '<div style="height:14px;background:#f0f2f5;border-radius:3px;overflow:hidden;margin-top:3px;">' +
+            '<div style="height:100%;width:' + w.toFixed(1) + '%;background:' + color + ';border-radius:3px;transition:width .2s;"></div>' +
+          '</div>' +
           '</div>';
         });
       html += '</div>';
@@ -5401,48 +5537,58 @@
         if (_bcSortKey !== k) return '<span style="color:#bbb;">↕</span>';
         return _bcSortDir < 0 ? '<span style="color:#1a73e8;">▼</span>' : '<span style="color:#1a73e8;">▲</span>';
       };
-      let th = '<tr style="background:#f5f5f5;">';
-      th += '<th style="padding:6px 8px;text-align:left;border:1px solid #e8e8e8;cursor:pointer;white-space:nowrap;" onclick="batchCalcSortBy(\'orderNo\')">订单编号 ' + arrow('orderNo') + '</th>';
+      // 排序按钮排（手机上自动换行，不需要左右滚动）
+      let sortBar = '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">' +
+        '<span style="font-size:12px;color:#888;">排序：</span>';
+      sortBar += '<button class="btn btn-secondary btn-sm" onclick="batchCalcSortBy(\'orderNo\')">订单编号 ' + arrow('orderNo') + '</button>';
       usedKeys.forEach(function (k) {
         const f = fieldsConfig.find(x => x.key === k);
         if (!f) return;
-        th += '<th style="padding:6px 8px;text-align:left;border:1px solid #e8e8e8;cursor:pointer;white-space:nowrap;" onclick="batchCalcSortBy(\'' + escapeJs(k) + '\')">' +
-              escapeHtml(f.label) + ' ' + arrow(k) + '</th>';
+        sortBar += '<button class="btn btn-secondary btn-sm" onclick="batchCalcSortBy(\'' + escapeJs(k) + '\')">' +
+                   escapeHtml(f.label) + ' ' + arrow(k) + '</button>';
       });
-      th += '<th style="padding:6px 8px;text-align:right;border:1px solid #e8e8e8;cursor:pointer;white-space:nowrap;background:#f0f5ff;" onclick="batchCalcSortBy(\'result\')">计算结果 ' + arrow('result') + '</th>';
-      th += '<th style="padding:6px 8px;border:1px solid #e8e8e8;width:44px;"></th></tr>';
+      sortBar += '<button class="btn btn-primary btn-sm" onclick="batchCalcSortBy(\'result\')">计算结果 ' + arrow('result') + '</button>';
+      sortBar += '</div>';
 
-      let rows = '';
+      // 明细：卡片式布局（手机上不再需要左右滚动）
+      let cards = '';
       listData.forEach(function (d) {
         const o = d.order;
         const ok = args_hasResult(d);
         const v = ok ? Number(d.result) : null;
         const isMax = ok && v === maxVal;
         const isMin = ok && v === minVal;
-        const bg = isMax ? '#fff7e6' : (isMin ? '#fff1f0' : '');
-        rows += '<tr style="' + (bg ? 'background:' + bg + ';' : '') + '">';
-        rows += '<td style="padding:5px 8px;border:1px solid #e8e8e8;white-space:nowrap;">' + escapeHtml(bcOrderLabel(o)) + '</td>';
+        const bg = isMax ? '#fff7e6' : (isMin ? '#fff1f0' : '#fff');
+        const bd = isMax ? '#ffd591' : (isMin ? '#ffccc7' : '#eee');
+        let flds = '';
         usedKeys.forEach(function (k) {
           const f = fieldsConfig.find(x => x.key === k);
           if (!f) return;
           const raw = o[k];
           const empty = (raw === '' || raw === null || raw === undefined);
-          rows += '<td style="padding:5px 8px;border:1px solid #e8e8e8;white-space:nowrap;' + (empty ? 'color:#cf1322;' : '') + '">' +
-                  (empty ? '缺' : escapeHtml(String(getDisplayText(f, raw)))) + '</td>';
+          flds += '<span style="display:inline-block;font-size:12px;color:#666;margin:2px 10px 2px 0;max-width:100%;">' +
+            escapeHtml(f.label) + ' ' +
+            '<b style="color:' + (empty ? '#cf1322' : '#333') + ';">' +
+            (empty ? '缺' : escapeHtml(String(getDisplayText(f, raw)))) + '</b></span>';
         });
-        rows += '<td style="padding:5px 8px;border:1px solid #e8e8e8;text-align:right;white-space:nowrap;font-weight:600;color:' +
-                (ok ? '#722ed1' : '#bbb') + ';">' + (ok ? escapeHtml(String(d.result)) : '—') + (isMax ? ' 🏆' : (isMin ? ' 🔻' : '')) + '</td>';
-        rows += '<td style="padding:5px 8px;border:1px solid #e8e8e8;text-align:center;">' +
-                '<button class="btn btn-secondary btn-sm" onclick="showBatchCalcDetailById(\'' + escapeJs(o.id) + '\')" title="查看计算过程">📖</button></td>';
-        rows += '</tr>';
+        cards += '<div style="border:1px solid ' + bd + ';background:' + bg + ';border-radius:8px;padding:8px 10px;margin-bottom:6px;">' +
+          '<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">' +
+            '<b style="font-size:13px;color:#1a73e8;word-break:break-all;">' + escapeHtml(bcOrderLabel(o)) + '</b>' +
+            '<span style="flex:1;min-width:6px;"></span>' +
+            '<b style="font-size:15px;color:' + (ok ? '#722ed1' : '#bbb') + ';white-space:nowrap;">' +
+              (ok ? escapeHtml(String(d.result)) : '算不出') + (isMax ? ' 🏆' : (isMin ? ' 🔻' : '')) + '</b>' +
+            '<button class="btn btn-secondary btn-sm" onclick="showBatchCalcDetailById(\'' + escapeJs(o.id) + '\')" title="查看计算过程">📖</button>' +
+          '</div>' +
+          (flds ? '<div style="margin-top:3px;line-height:1.7;">' + flds + '</div>' : '') +
+          '</div>';
       });
       const filteredTip = _bcRangeFilter
-        ? '（已按区间筛选：' + bcFmtNum(_bcRangeFilter.lo) + ' ~ ' + bcFmtNum(_bcRangeFilter.hi) + '，共 ' + listData.length + ' 单）'
+        ? '（已筛选区间 ' + bcFmtNum(_bcRangeFilter.lo) + ' ~ ' + bcFmtNum(_bcRangeFilter.hi) + '，共 ' + listData.length + ' 单）'
         : '';
       html += '<div style="margin-top:14px;font-size:13px;color:#333;">' +
-        '<b>📋 订单明细</b> <span style="color:#888;font-size:12px;">共 ' + data.length + ' 单' + filteredTip + '　点表头可排序</span></div>';
-      html += '<div style="margin-top:6px;max-height:46vh;overflow:auto;border:1px solid #eee;border-radius:6px;">' +
-        '<table style="width:100%;border-collapse:collapse;font-size:12px;">' + th + rows + '</table></div>';
+        '<b>📋 订单明细</b> <span style="color:#888;font-size:12px;">共 ' + data.length + ' 单' + filteredTip + '</span></div>';
+      html += '<div style="margin-top:6px;">' + sortBar + '</div>';
+      html += '<div style="max-height:52vh;overflow-y:auto;">' + cards + '</div>';
 
       box.innerHTML = html;
     }
@@ -7160,6 +7306,7 @@
       loadViewSettings();
       loadSortState();
       loadOcrRules();
+      loadStatsScope();       // 统计栏的"跟随筛选 / 全部订单"偏好
       document.body.setAttribute('data-mview', mobileViewMode);
       updateViewSwitchButtons();
       document.getElementById('ghToken').value = syncToken || '';
@@ -7193,7 +7340,7 @@
     bootstrap();
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.09.13-18'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.09.13-19'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
