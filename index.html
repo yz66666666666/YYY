@@ -317,7 +317,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-19</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-20</button>
      <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
      <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
@@ -3223,7 +3223,13 @@
       const sField = sfd ? fieldsConfig.find(f => f.key === sfd) : null;
       const filtered = orders.filter(o => {
         if (sf) {
-          if (o.status !== sf) return false;
+          if (sf === STATUS_EMPTY) {
+            // 只看"状态没填"的订单
+            const v = o.status;
+            if (!(v === undefined || v === null || v === '')) return false;
+          } else if (o.status !== sf) {
+            return false;
+          }
         }
         if (kw) {
           let haystack;
@@ -3505,13 +3511,28 @@
       sel.value = current;
     }
 
+    // 状态筛选里"未填写"的专用值（订单的 status 为空时归到这一类）
+    const STATUS_EMPTY = '__EMPTY__';
+
     function renderStatusFilter() {
       const sel = document.getElementById('statusFilter');
       const sf = fieldsConfig.find(f => f.key === 'status');
-      const sig = sf ? JSON.stringify(sf.options) : 'none';
+      // 统计"状态没填"的订单数（用户要求：这个选项要带数量，方便知道还有几单没填）
+      let emptyCount = 0;
+      if (sf) {
+        for (let i = 0; i < orders.length; i++) {
+          const v = orders[i].status;
+          if (v === undefined || v === null || v === '') emptyCount++;
+        }
+      }
+      const sig = (sf ? JSON.stringify(sf.options) : 'none') + '|' + emptyCount;
       if (sel._sig === sig) return;
       const current = sel.value;
       let opts = '<option value="">全部状态</option>';
+      // 只有真的存在"没填状态"的订单时才显示这一项，不给自己添乱
+      if (sf && emptyCount > 0) {
+        opts += '<option value="' + STATUS_EMPTY + '">未填写（' + emptyCount + '）</option>';
+      }
       if (sf && sf.options) {
         sf.options.forEach(o => {
           opts += '<option value="' + escapeAttr(o.value) + '">' + escapeHtml(o.label) + '</option>';
@@ -7340,7 +7361,7 @@
     bootstrap();
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.09.13-19'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.09.13-20'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
