@@ -260,6 +260,13 @@
     box-shadow: 0 1px 4px rgba(0,0,0,0.06); user-select: none;
   }
   .stats-scope:hover { background: #eef4ff; }
+  /* 公告按钮上的未读数量小红点 */
+  .cl-badge {
+    display: inline-block; min-width: 16px; height: 16px; line-height: 16px;
+    margin-left: 5px; padding: 0 4px; border-radius: 8px;
+    background: #ff4d4f; color: #fff; font-size: 11px; text-align: center;
+    vertical-align: 1px;
+  }
   /* 手机上：统计卡片横向排列、可左右滑动，别竖着占一大堆高度 */
   @media (max-width: 768px) {
     .stats-bar { flex-wrap: nowrap; overflow-x: auto; padding: 10px 10px 12px; gap: 8px; -webkit-overflow-scrolling: touch; }
@@ -334,9 +341,10 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-21</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.15-1</button>
      <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
      <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
+     <button class="btn btn-secondary btn-sm" id="changelogBtn" onclick="openChangelog()">📢 公告</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
     <button class="btn btn-secondary" onclick="openStatsConfig()">📊 统计配置</button>
     <button class="btn btn-secondary" onclick="document.getElementById('syncModal').classList.add('show')">☁️ 同步</button>
@@ -865,6 +873,20 @@
     <div class="modal-ftr">
       <button class="btn btn-secondary" onclick="document.getElementById('presetEditorModal').classList.remove('show')">取消</button>
       <button class="btn btn-primary" onclick="savePresetEditor()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 更新公告弹窗 ============ -->
+<div class="modal-mask" id="changelogModal">
+  <div class="modal modal-md">
+    <div class="modal-hdr">
+      <h3>📢 更新公告</h3>
+      <button class="close-x" onclick="document.getElementById('changelogModal').classList.remove('show')">×</button>
+    </div>
+    <div class="modal-body" id="changelogList"></div>
+    <div class="modal-ftr">
+      <button class="btn btn-primary" onclick="document.getElementById('changelogModal').classList.remove('show')">知道了</button>
     </div>
   </div>
 </div>
@@ -7550,6 +7572,7 @@
       loadSortState();
       loadOcrRules();
       loadStatsScope();       // 统计栏的"跟随筛选 / 全部订单"偏好
+      updateChangelogBadge(); // 公告按钮上的未读数量
       document.body.setAttribute('data-mview', mobileViewMode);
       updateViewSwitchButtons();
       document.getElementById('ghToken').value = syncToken || '';
@@ -7583,7 +7606,128 @@
     bootstrap();
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.09.13-21'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.09.15-1'; // 每次修改系统时改一下版本号即可触发更新
+    // 规则：YYYY.MM.DD-N，日期必须是【当天真实日期】，N 是当天第几次修改。
+    // 历史教训：曾经照着前一天的日期往下累加，导致版本号日期失真（铁律 1 说的就是这个坑）。
+
+    // ==================== 更新公告（历史 + 本次） ====================
+    // 每条：ver 版本号 / date 日期 / 分类 items（🐛修复 ⚡优化 ✨新增 💾数据安全 📌其他）
+    // 说明：2026.09.13-6 ~ -21 是按当时（9/13 起）连续的改动号，日期沿用当时发布的号；
+    //       从 2026.09.15-1 起严格按"当天真实日期-当天序号"执行。
+    const APP_CHANGELOG = [
+      {
+        ver: '2026.09.15-1', date: '2026-09-15',
+        items: [
+          ['🐛 修复', [
+            '批量修改：提示说改了、订单却没变（屏幕不刷新，要退出重进才生效）',
+            '统计栏「未发货 / 待处理」一直显示 0（筛选计数算错）',
+            '定位到原订单：跳过去了却看不见高亮',
+            '取消选择：有时会自己又勾上（手指抬起时误触到别的行）',
+            '筛选状态下改值，该单不会立即移出列表，要刷新才消失'
+          ]],
+          ['⚡ 优化', [
+            '下滑不再等：空闲时提前把下一屏加载好，滑到就是秒开',
+            '长内容改成「往下多几行」，不再把表格撑得老宽',
+            '统计栏跟随筛选（并可在右下角切换成「全部订单」）',
+            '状态筛选新增「未填写」，并显示有多少单没填状态',
+            '批量计算：最大/最小直接显示是哪一单、关键字段是多少，可一键定位',
+            '批量计算：明细可任意列排序 + 结果分布柱状图（段数可调）'
+          ]],
+          ['💾 数据安全', [
+            '数据搬到更宽敞的存储空间，不再和另一个工具抢地方',
+            '云端自动备份 + 每周自动导出（只保留最近 5 份）',
+            '存储快满时弹红色告警，不再"静默丢数据"',
+            '导出的备份文件不再包含你的 Token'
+          ]]
+        ]
+      },
+      { ver: '2026.09.13-21', date: '2026-09-13', items: [['⚡ 优化', ['空闲时静默预加载下一屏，下滑更顺']], ['🐛 修复', ['长内容把表格撑得过宽']]] },
+      { ver: '2026.09.13-20', date: '2026-09-13', items: [['✨ 新增', ['状态筛选增加「未填写（N）」，专门筛出没填状态的订单']]] },
+      { ver: '2026.09.13-19', date: '2026-09-13', items: [['🐛 修复', ['统计栏恢复为「跟随筛选」', '定位到原订单失效']], ['⚡ 优化', ['批量计算明细改为卡片式（手机不用左右滚）', '分布图横条占满整行', '统计卡片在手机上横向排列']]] },
+      { ver: '2026.09.13-18', date: '2026-09-13', items: [['✨ 新增', ['批量计算：显示最大/最小的订单与关键字段，可定位回原订单', '明细表可任意列排序（售价高→低等）', '结果分布柱状图（段数可调、可比订单数或金额）', '算不出结果的订单单独列出']]] },
+      { ver: '2026.09.13-17', date: '2026-09-13', items: [['🐛 修复', ['统计栏筛选计数（未发货/待处理）永远显示 0']]] },
+      { ver: '2026.09.13-16', date: '2026-09-13', items: [['🐛 修复', ['批量改值后屏幕不重画（要退出重进才看到）']]] },
+      { ver: '2026.09.13-15', date: '2026-09-13', items: [['🐛 修复', ['批量修改在特定点击顺序下静默失效']]] },
+      { ver: '2026.09.13-14', date: '2026-09-13', items: [['💾 数据安全', ['订单数据迁到更宽敞的存储空间（IndexedDB）', '带条数校验，失败自动回退']]] },
+      { ver: '2026.09.13-13', date: '2026-09-13', items: [['✨ 新增', ['存储占用面板 + 救急导出']], ['🐛 修复', ['存储告警会指明是哪个应用占的空间', '历史备份可检测"哪份比现在更完整"']]] },
+      { ver: '2026.09.13-12', date: '2026-09-13', items: [['🐛 修复', ['批量修改先刷新界面再保存，不再谎报成功']]] },
+      { ver: '2026.09.13-11', date: '2026-09-13', items: [['💾 数据安全', ['上传到云端的内容不再包含 Token（此前因此被 GitHub 自动吊销）', '导出的备份文件不含 Token', 'Token 输入框改为密码框，可点眼睛查看']], ['🐛 修复', ['恢复备份不再丢失同步设置']]] },
+      { ver: '2026.09.13-10', date: '2026-09-13', items: [['✨ 新增', ['每周自动导出备份（只留最近 5 份）', '超过 3 天没备份会显示黄条提醒']], ['💾 数据安全', ['存储快满时红色告警，不再静默丢数据']], ['🐛 修复', ['PWA 每次打开都白刷一次']]] },
+      { ver: '2026.09.13-9', date: '2026-09-13', items: [['⚡ 优化', ['统计栏改为增量计算：改一单不再重算全部（快 1000 倍以上）']]] },
+      { ver: '2026.09.13-8', date: '2026-09-13', items: [['⚡ 优化', ['统计栏改为后台计算 + 角落转圈提示，不挡操作']]] },
+      { ver: '2026.09.13-7', date: '2026-09-13', items: [['⚡ 优化', ['虚拟滚动：上千条订单也不再卡（DOM 只保留看得见的几十行）']]] },
+      {
+        ver: '2026.09.13-6', date: '2026-09-13',
+        items: [
+          ['🐛 修复', [
+            '订单号跨天重复（计数器用 UTC，每天早上 8 点归零）',
+            '公式 abs(-5) 算成 4（负数被当成缺左操作数）',
+            '图片字段的"×"点了报错删不掉',
+            '导入 JSON 备份有时导入 0 条',
+            '恢复备份会丢失商品库',
+            '字段标识里打引号会让整个表单白屏',
+            '删除商品/字段按"行号"删，可能删错对象'
+          ]],
+          ['⚡ 优化', ['全部提示改用页内提示条，不再用浏览器原生弹窗（在弹窗里会出问题）', '必填没填时把出错那项标红并滚到眼前']]
+        ]
+      },
+      {
+        ver: '2026.09.13-5', date: '2026-09-13',
+        items: [
+          ['📌 其他', [
+            '新电脑环境搭建完成：装好 GitHub CLI、配好部署链路、验证部署成功',
+            '项目文件移到 C:\\订单管理系统（原在下载文件夹，重复文件已清理）'
+          ]]
+        ]
+      }
+    ];
+
+    // 公告按钮上的"未读"红点：记住上次看到哪个版本
+    const CHANGELOG_SEEN_KEY = 'om_changelog_seen';
+    function changelogUnreadCount() {
+      const seen = getSetting(CHANGELOG_SEEN_KEY, '');
+      if (!seen) return APP_CHANGELOG.length;      // 从没看过 → 全部算未读
+      const idx = APP_CHANGELOG.findIndex(e => e.ver === seen);
+      return idx < 0 ? APP_CHANGELOG.length : idx;  // 排在前面的都是更新
+    }
+    function updateChangelogBadge() {
+      const btn = document.getElementById('changelogBtn');
+      if (!btn) return;
+      const n = changelogUnreadCount();
+      btn.innerHTML = '📢 公告' + (n > 0 ? '<span class="cl-badge">' + n + '</span>' : '');
+    }
+    function openChangelog() {
+      const box = document.getElementById('changelogList');
+      let html = '';
+      html += '<div style="margin-bottom:12px;padding:8px 10px;background:#f6f8fa;border-radius:6px;font-size:12px;color:#666;line-height:1.7;">' +
+        '版本号规则：<b>年.月.日-当天第几次修改</b>（例如 2026.09.15-1）。<br>' +
+        '当前版本：<b>v' + APP_VERSION + '</b>' +
+        '</div>';
+      APP_CHANGELOG.forEach(function (entry, i) {
+        const isCurrent = entry.ver === APP_VERSION;
+        html += '<div style="border:1px solid ' + (isCurrent ? '#91caff' : '#eee') + ';background:' + (isCurrent ? '#f0f7ff' : '#fff') + ';border-radius:8px;padding:10px 12px;margin-bottom:10px;">';
+        html += '<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">' +
+          '<b style="font-size:14px;color:#1a73e8;">v' + escapeHtml(entry.ver) + '</b>' +
+          '<span style="font-size:12px;color:#888;">' + escapeHtml(entry.date) + '</span>' +
+          (isCurrent ? '<span style="font-size:11px;background:#1a73e8;color:#fff;border-radius:8px;padding:1px 7px;">当前版本</span>' : '') +
+          (i === 0 ? '<span style="font-size:11px;background:#52c41a;color:#fff;border-radius:8px;padding:1px 7px;">最新</span>' : '') +
+          '</div>';
+        entry.items.forEach(function (pair) {
+          html += '<div style="margin-top:6px;">' +
+            '<div style="font-size:12px;font-weight:600;color:#555;">' + escapeHtml(pair[0]) + '</div>' +
+            '<ul style="margin:4px 0 0 0;padding-left:18px;font-size:13px;color:#333;line-height:1.8;">' +
+            pair[1].map(function (t) { return '<li>' + escapeHtml(t) + '</li>'; }).join('') +
+            '</ul></div>';
+        });
+        html += '</div>';
+      });
+      box.innerHTML = html;
+      document.getElementById('changelogModal').classList.add('show');
+      // 打开即算"已看过"
+      setSetting(CHANGELOG_SEEN_KEY, APP_VERSION);
+      updateChangelogBadge();
+    }
+
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
