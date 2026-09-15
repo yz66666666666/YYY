@@ -34,6 +34,20 @@
   table { width: 100%; border-collapse: collapse; min-width: 800px; }
   th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #f0f0f0; font-size: 14px; vertical-align: middle; }
   th { background: #fafbfc; font-weight: 600; color: #555; white-space: nowrap; position: sticky; top: 0; }
+  /* 单元格：内容长了【优先换行变高】，绝不允许横向撑得老宽。
+     原因：手机上表格本来就要左右滑，某一行特别宽会让人划不到头，观感很差。
+     做法：给单元格宽度设上限 + 允许在任意字符处断开（长串数字/长商品名都能换行）。 */
+  #ordersTbody td {
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    max-width: 170px;
+    line-height: 1.5;
+  }
+  /* 多行文本字段保留原有换行符 */
+  #ordersTbody td .cell-wrap-text { white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
+  /* 订单编号、状态这类短内容不需要占满上限，给个更紧的宽度更好看 */
+  #ordersTbody td.cell-narrow { max-width: 120px; }
   tr:hover td { background: #f8faff; }
   tbody tr { contain: layout style; }
   td.clickable { cursor: pointer; }
@@ -94,13 +108,16 @@
   .mode-config-list { border: 1px solid #eee; border-radius: 6px; padding: 4px 10px; max-height: 220px; overflow-y: auto; }
   /* 手动排序拖拽状态 */
   .dragging-order { opacity: 0.5; background: #e6f7ff !important; }
-  /* 从批量计算器"定位到原订单"时，让那一行闪一下，方便一眼找到 */
-  @keyframes locate-flash {
-    0%   { background: #fffbe6; box-shadow: inset 0 0 0 2px #ffc53d; }
-    50%  { background: #fff1b8; box-shadow: inset 0 0 0 2px #fa8c16; }
-    100% { background: #fffbe6; box-shadow: inset 0 0 0 2px #ffc53d; }
+  /* 从批量计算器"定位到原订单"时，给那一行加明显的高亮。
+     注意：用 box-shadow + outline 一起，兼容性最好（只靠 animation 在部分浏览器不生效）；
+     而且由 JS 控制"什么时候开始闪、闪多久"，保证一定被看到。 */
+  .locate-flash {
+    background: #fff7e6 !important;
+    outline: 3px solid #fa8c16 !important;
+    outline-offset: -3px;
+    box-shadow: 0 0 0 3px rgba(250,140,22,0.35) !important;
+    transition: background 0.15s, outline-color 0.15s;
   }
-  .locate-flash, .locate-flash td { animation: locate-flash 0.8s ease-in-out 3; }
   body.dragging-active { user-select: none; -webkit-user-select: none; cursor: move; }
   body.dragging-active * { cursor: move !important; }
   @media (max-width: 768px) {
@@ -317,7 +334,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-20</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.13-21</button>
      <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
      <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
@@ -3062,6 +3079,7 @@
       _renderListCache = null;
       _formulaCache = null;
       _filterSigCache = null;
+      winCacheClear();          // 预拼好的窗口内容作废（数据/字段变了，内容就旧了）
       // 数据变了 → 标记"需要原地重画一次"，否则批量改值后屏幕不会更新
       _needRepaint = true;
       // 统计栏不清空旧值（先显示旧数字，避免闪白），只把"数据版本号"+1，
@@ -3605,7 +3623,7 @@
         return '<div class="img-txt">' + inner + '<span>' + escapeHtml(txt || '') + '</span></div>';
       }
       if (field.type === 'textarea') {
-        return '<span style="white-space:pre-wrap">' + escapeHtml(val) + '</span>';
+        return '<span class="cell-wrap-text">' + escapeHtml(val) + '</span>';
       }
       if (field.type === 'number') {
         return '<span style="font-weight:500">' + escapeHtml(String(val)) + '</span>';
@@ -3674,6 +3692,79 @@
     }
 
     // 渲染 [start, start+count) 这些行，并设置上下占位高度
+    // ==================== 窗口内容缓存 + 静默预加载 ====================
+    // 用户反馈：下滑时"来不及加载"，要等一会儿。
+    // 原因：每一屏的行 HTML 是"现场拼"的，1000+ 条时拼一次要上百毫秒。
+    // 方案（用户提议，采纳）：页面空闲时【提前把下一屏也拼好】放进缓存，
+    // 用户下滑时直接取用 → 几乎无延迟；浏览时预拼不抢资源，不影响当前操作。
+    let _winHtmlCache = [];          // [{start, count, sig, html}] 预拼好的窗口内容
+    let _idleBuildScheduled = false;
+
+    function winCacheSig() {
+      // 任何会影响"某一屏长什么样"的东西变了，缓存就必须作废
+      return mobileViewMode + '|' +
+        fieldsConfig.map(f => f.key + ':' + f.type + ':' + (f.hidden ? 'h' : '') + ':' + f.label + ':' + (f.options ? f.options.length : 0)).join(',') +
+        '|' + getCompactFieldKeys().join(',');
+    }
+    function winCacheFind(start, count) {
+      const sig = winCacheSig();
+      for (let i = 0; i < _winHtmlCache.length; i++) {
+        const c = _winHtmlCache[i];
+        if (c.start === start && c.count === count && c.sig === sig) return c.html;
+      }
+      return null;
+    }
+    function winCachePut(start, count, html) {
+      const sig = winCacheSig();
+      _winHtmlCache = _winHtmlCache.filter(c => !(c.start === start && c.count === count && c.sig === sig));
+      _winHtmlCache.push({ start: start, count: count, sig: sig, html: html });
+      if (_winHtmlCache.length > 3) _winHtmlCache.shift();   // 最多留 3 屏，别占内存
+    }
+    function winCacheClear() {
+      _winHtmlCache = [];
+      _idleBuildScheduled = false;   // 一起重置：否则"已排队"标记卡住，预加载就再也不执行了
+    }
+
+    // 拼一屏的行 HTML（拼完可以缓存复用）
+    function buildWindowRowsHtml(start, count) {
+      const list = _currentList;
+      const total = list.length;
+      const slice = list.slice(start, Math.min(start + count, total));
+      let html = '';
+      if (mobileViewMode === 'table') {
+        const fields = getVisibleFields('table');
+        slice.forEach(o => { html += buildTableRow(o, fields); });
+      } else if (mobileViewMode === 'card') {
+        const fields = getVisibleFields('card');
+        slice.forEach(o => { html += buildCardHtml(o, fields); });
+      } else {
+        const keyFields = fieldsConfig.filter(f => getCompactFieldKeys().indexOf(f.key) >= 0);
+        slice.forEach(o => { html += buildCompactRowHtml(o, keyFields); });
+      }
+      return { html: html, count: slice.length };
+    }
+
+    // 页面空闲时，悄悄把"下一屏"（或上一屏）拼好放着，等用户滑到就能秒开
+    function scheduleIdlePrebuild(start, count) {
+      if (_idleBuildScheduled) return;
+      if (start < 0 || start >= _currentList.length) return;
+      if (winCacheFind(start, count)) return;          // 已经有了
+      _idleBuildScheduled = true;
+      const run = function () {
+        _idleBuildScheduled = false;
+        // 排到队列里时数据可能已经变了，重新校验
+        if (start >= _currentList.length) return;
+        if (winCacheFind(start, count)) return;
+        const built = buildWindowRowsHtml(start, count);
+        winCachePut(start, count, built.html);
+      };
+      if (typeof requestIdleCallback === 'function') {
+        requestIdleCallback(run, { timeout: 1200 });
+      } else {
+        setTimeout(run, 300);
+      }
+    }
+
     function renderWindow(start, count, scrollToListIndex) {
       const list = _currentList;
       const total = list.length;
@@ -3690,17 +3781,16 @@
       const topH = Math.round(start * rowH * scale);
       const botH = Math.round(Math.max(0, total - (start + count)) * rowH * scale);
 
-      const slice = list.slice(start, Math.min(start + count, total));
-      let html = '';
-      if (mobileViewMode === 'table') {
-        const fields = getVisibleFields('table');
-        slice.forEach(o => { html += buildTableRow(o, fields); });
-      } else if (mobileViewMode === 'card') {
-        const fields = getVisibleFields('card');
-        slice.forEach(o => { html += buildCardHtml(o, fields); });
+      // 先看缓存里有没有现成的（静默预加载提前拼好的）
+      let bodyHtml = winCacheFind(start, count);
+      let sliceCount;
+      if (bodyHtml != null) {
+        sliceCount = Math.min(count, total - start);
       } else {
-        const keyFields = fieldsConfig.filter(f => getCompactFieldKeys().indexOf(f.key) >= 0);
-        slice.forEach(o => { html += buildCompactRowHtml(o, keyFields); });
+        const built = buildWindowRowsHtml(start, count);
+        bodyHtml = built.html;
+        sliceCount = built.count;
+        winCachePut(start, count, bodyHtml);
       }
 
       // 一次性替换内容（占位 + 行）
@@ -3710,13 +3800,13 @@
         const colspan = getVisibleFields('table').length + 2;
         const spTop = '<tr id="vSpacerTop" style="height:' + topH + 'px;"><td colspan="' + colspan + '" style="padding:0;border:none;"></td></tr>';
         const spBot = '<tr id="vSpacerBot" style="height:' + botH + 'px;"><td colspan="' + colspan + '" style="padding:0;border:none;"></td></tr>';
-        container.innerHTML = spTop + html + spBot;
+        container.innerHTML = spTop + bodyHtml + spBot;
       } else {
         container.innerHTML =
           '<div id="vSpacerTop" style="height:' + topH + 'px;overflow:hidden;"></div>' +
-          html +
+          bodyHtml +
           '<div id="vSpacerBot" style="height:' + botH + 'px;overflow:hidden;"></div>';
-        if (!tableMode && mobileViewMode === 'compact') {
+        if (mobileViewMode === 'compact') {
           Array.prototype.forEach.call(container.querySelectorAll('.compact-row'), row => {
             bindCompactLongPress(row, row.getAttribute('data-id'));
           });
@@ -3724,14 +3814,21 @@
       }
 
       _winStart = start;
-      _winCount = slice.length;
+      _winCount = sliceCount;
 
       // 测量真实行高，用于下次算占位高度
       measureRowHeight(container);
 
+      // ★ 静默预加载：把"下一屏"提前拼好（用户下滑时就能秒开）
+      if (start + sliceCount < total) {
+        scheduleIdlePrebuild(start + sliceCount, count);
+      }
+
       if (scrollToListIndex != null) {
         scrollToIndex(scrollToListIndex);
       }
+      // 如果正在"定位高亮"某一单，而它正好在这一屏里 → 立刻标出来
+      reapplyLocateFlashAfterRender();
       updateResultCount();
     }
 
@@ -3832,12 +3929,13 @@
     function buildTableRow(o, visibleFields) {
       const checked = selectedOrders.has(o.id) ? 'checked' : '';
       let html = '<tr data-id="' + escapeAttr(o.id) + '">';
-      html += '<td class="checkbox-cell"><input type="checkbox" ' + checked + ' onchange="toggleSelectOrder(\'' + escapeJs(o.id) + '\', this.checked)"></td>';
+      html += '<td class="checkbox-cell"><input type="checkbox" data-oid="' + escapeAttr(o.id) + '" ' + checked + ' onchange="toggleSelectOrder(\'' + escapeJs(o.id) + '\', this.checked)"></td>';
       visibleFields.forEach(f => {
         const cellHtml = renderCellValue(f, o);
         const onclick = (f.type === 'formula')
           ? 'onclick="showFormulaDetail(\'' + escapeJs(o.id) + '\', \'' + escapeJs(f.key) + '\')" title="点击查看计算过程"'
           : 'onclick="startInlineEdit(this, \'' + escapeJs(o.id) + '\', \'' + escapeJs(f.key) + '\')"';
+        // 内容长了就换行变高（CSS 已限宽），不会把表格撑得老宽
         html += '<td class="clickable" ' + onclick + '>' + cellHtml + '</td>';
       });
       html += '<td class="actions-cell">' +
@@ -3852,6 +3950,7 @@
     function refreshOrderRow(orderId) {
       const o = orders.find(x => x.id === orderId);
       if (!o) return false;
+      winCacheClear();   // 某一行的内容变了，预拼缓存必须作废，否则滑回去会看到旧值
       try {
         if (mobileViewMode === 'table') {
           const tr = document.querySelector('#ordersTbody tr[data-id="' + orderId + '"]');
@@ -3909,7 +4008,7 @@
       const checked = selectedOrders.has(o.id) ? 'checked' : '';
       let html = '';
       html += '<div class="card" data-id="' + escapeAttr(o.id) + '">';
-      html += '<div class="card-checkbox"><input type="checkbox" ' + checked + ' onchange="toggleSelectOrder(\'' + escapeJs(o.id) + '\', this.checked)"> 选择此订单</div>';
+      html += '<div class="card-checkbox"><input type="checkbox" data-oid="' + escapeAttr(o.id) + '" ' + checked + ' onchange="toggleSelectOrder(\'' + escapeJs(o.id) + '\', this.checked)"> 选择此订单</div>';
       html += '<div class="card-header">';
       html += '<div class="card-title">' + escapeHtml(cardTitleOf(o)) + '</div>';
       html += '<div class="card-actions">';
@@ -4035,7 +4134,7 @@
       const checked = selectedOrders.has(o.id) ? 'checked' : '';
       let html = '';
       html += '<div class="compact-row" data-id="' + escapeAttr(o.id) + '">';
-      html += '<label class="cr-check" title="长按进入编辑"><input type="checkbox" ' + checked + ' onchange="toggleSelectOrder(\'' + escapeJs(o.id) + '\', this.checked)"></label>';
+      html += '<label class="cr-check" title="长按进入编辑"><input type="checkbox" data-oid="' + escapeAttr(o.id) + '" ' + checked + ' onchange="toggleSelectOrder(\'' + escapeJs(o.id) + '\', this.checked)"></label>';
       html += '<div class="compact-cells">';
       keyFields.forEach(f => {
         const onclick = (f.type === 'formula')
@@ -4927,7 +5026,39 @@
     }
 
     // ============ 批量操作 ============
+    // 取消选择后的一小段时间里：取消选择时记录"当时屏幕上的行"，此后只接受这些行的勾选，
+    // 忽略来自"新滑出来的行"的勾选。
+    // 原因：手机上点"取消选择"后列表重排，手指抬起时下方可能正好换成另一个复选框，
+    // 于是"抬手"又勾上了一单 —— 看起来就像"取消选择没生效"（用户反馈的真实现象）。
+    // 注意：不能无差别地屏蔽所有勾选，否则用户紧接着的主动勾选也会失效（测试抓过这个坑）。
+    let _selectGuardUntil = 0;
+    let _selectGuardIds = null;
+    function getRowOrderIds() {
+      const ids = {};
+      try {
+        Array.prototype.forEach.call(
+          document.querySelectorAll('#ordersTbody [data-oid], #compactList [data-oid], #cardList [data-oid]'),
+          function (el) {
+            const v = el.getAttribute('data-oid');
+            if (v) ids[v] = true;
+          });
+      } catch (e) {}
+      return ids;
+    }
+
     function toggleSelectOrder(id, checked) {
+      // 取消选择后的短暂保护期：只忽略"凭空冒出来"的勾选。
+      // 注意：必须确认名单里真的有行才启用保护 —— 空对象 {} 在 JS 里也是"真"，
+      // 否则会把用户紧接着的主动勾选也挡掉（测试抓过这个坑）。
+      const guardCount = _selectGuardIds ? Object.keys(_selectGuardIds).length : 0;
+      if (checked && guardCount > 0 && Date.now() < _selectGuardUntil && !_selectGuardIds[id]) {
+        // 这一行是刚滑出来的，不可能是用户想点的 → 把界面纠正回未勾选
+        try {
+          const el = document.querySelector('input[type=checkbox][data-oid="' + id + '"]');
+          if (el) el.checked = false;
+        } catch (e) {}
+        return;
+      }
       if (checked) selectedOrders.add(id);
       else selectedOrders.delete(id);
       updateBatchBar();
@@ -4944,18 +5075,41 @@
       } else {
         filteredList.forEach(o => selectedOrders.delete(o.id));
       }
-      renderTbody();
-      renderCards();
+      forceRepaintWindow();
       updateBatchBar();
     }
     function selectAllVisible() {
       const filteredList = getFilteredOrders();
       filteredList.forEach(o => selectedOrders.add(o.id));
+      forceRepaintWindow();
+      updateBatchBar();
+    }
+    // 强制重画当前这一屏（改勾选状态时用，确保屏幕上所有复选框都对上）
+    function forceRepaintWindow() {
+      _listSig = '';
+      _needRepaint = true;
+      winCacheClear();
       render();
     }
     function clearSelection() {
       selectedOrders.clear();
-      render();
+      // 记下"取消那一刻屏幕上原本有哪些行"：之后只接受这些行的勾选
+      _selectGuardIds = getRowOrderIds();
+      _selectGuardUntil = Date.now() + 500;
+      forceRepaintWindow();
+      updateBatchBar();
+      setTimeout(function () {
+        _selectGuardIds = null;
+        _selectGuardUntil = 0;
+      }, 520);
+      // 再兜一次：万一还有残留的勾选，300ms 后按真实状态纠正一遍
+      setTimeout(function () {
+        if (selectedOrders.size > 0) {
+          selectedOrders.clear();
+          forceRepaintWindow();
+          updateBatchBar();
+        }
+      }, 300);
     }
     function updateBatchBar() {
       const bar = document.getElementById('batchBar');
@@ -5319,24 +5473,75 @@
       //   _winStart 重置为 0，直接设会被冲掉（这就是之前定位失效的原因）
       _winOverride = Math.max(0, Math.min(idx - 3, Math.max(0, list.length - 10)));
       _needRepaint = true;
-      render();
-      // 滚到那一行并闪一下
-      setTimeout(function () {
-        const sel = '#ordersTbody tr[data-id="' + orderId + '"], #compactList .compact-row[data-id="' + orderId + '"], #cardList .card[data-id="' + orderId + '"]';
-        const row = document.querySelector(sel);
-        if (!row) { showToast('ℹ️ 已定位到订单，请手动往下找一下'); return; }
-        // 自己算滚动位置（scrollIntoView 在虚拟滚动下不太可靠）
-        try {
-          const rect = row.getBoundingClientRect();
-          const target = window.scrollY + rect.top - (window.innerHeight / 2) + (rect.height / 2);
-          window.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
-        } catch (e) {
-          try { row.scrollIntoView({ block: 'center' }); } catch (e2) {}
-        }
-        row.classList.add('locate-flash');
-        setTimeout(function () { row.classList.remove('locate-flash'); }, 3200);
-      }, 260);   // 等虚拟滚动重画完再找行
+      render();                            // 先把目标那一屏画出来（内部会滚动到位）
+      // ★ 画出来之后才开始高亮：早了会"闪给空气看"，用户看到画面时时间已过
+      setLocateTarget(orderId);
       if (cleared) showToast('ℹ️ 已清空搜索/筛选，方便你看到这一单');
+    }
+
+    // ==================== 定位高亮（等行真正画出来才开始闪） ====================
+    // 用户反馈：跳转时目标那一屏还没加载，等他看到画面时"高亮时间已经过了"。
+    // 所以改成：行画出来之后才开始闪，并且一直闪到用户离开那一屏为止。
+    let _locateTargetId = null;      // 正在高亮的订单 id
+    let _locateStopAt = 0;           // 到这个时间点自动停下
+    let _locateTimer = null;
+    function setLocateTarget(orderId) {
+      _locateTargetId = orderId;
+      _locateStopAt = Date.now() + 8000;   // 最长闪 8 秒（期间滚走再回来还会继续闪）
+      if (_locateTimer) clearInterval(_locateTimer);
+      _locateTimer = setInterval(function () {
+        if (Date.now() > _locateStopAt) {
+          clearInterval(_locateTimer); _locateTimer = null;
+          _locateTargetId = null;
+          removeLocateFlash();
+          return;
+        }
+        // 已经被画出来了吗？画出来了才开始闪
+        const row = findOrderRowNode(_locateTargetId);
+        if (row) applyLocateFlash(row);
+      }, 200);
+      // 立刻试一次（目标可能已经在页面上）
+      setTimeout(function () {
+        const row = findOrderRowNode(_locateTargetId);
+        if (row) { applyLocateFlash(row); scrollRowIntoView(row); }
+      }, 60);
+    }
+    function findOrderRowNode(id) {
+      if (!id) return null;
+      try {
+        return document.querySelector(
+          '#ordersTbody tr[data-id="' + id + '"], #compactList .compact-row[data-id="' + id + '"], #cardList .card[data-id="' + id + '"]');
+      } catch (e) { return null; }
+    }
+    function applyLocateFlash(row) {
+      if (!row || row.classList.contains('locate-flash')) return;
+      row.classList.add('locate-flash');
+    }
+    function removeLocateFlash() {
+      try {
+        Array.prototype.forEach.call(document.querySelectorAll('.locate-flash'), function (el) {
+          el.classList.remove('locate-flash');
+        });
+      } catch (e) {}
+    }
+    function scrollRowIntoView(row) {
+      if (!row) return;
+      try {
+        const rect = row.getBoundingClientRect();
+        const target = window.scrollY + rect.top - (window.innerHeight / 2) + (rect.height / 2);
+        if (Math.abs(rect.top + rect.height / 2 - window.innerHeight / 2) > 40) {
+          window.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+        }
+      } catch (e) {
+        try { row.scrollIntoView({ block: 'center' }); } catch (e2) {}
+      }
+    }
+    // 每次重画窗口后调用：如果高亮目标正好在这一屏里，就把它标出来（虚拟滚动换屏后也不会丢）
+    function reapplyLocateFlashAfterRender() {
+      if (!_locateTargetId) return;
+      if (Date.now() > _locateStopAt) { _locateTargetId = null; return; }
+      const row = findOrderRowNode(_locateTargetId);
+      if (row) applyLocateFlash(row);
     }
 
     // 取出一条数据在某个排序键上的"可比较值"
@@ -5997,8 +6202,25 @@
       _formulaCache = null;
       // 统计栏：把这次改动的影响量加回累加器（O(统计项数)，与订单条数无关）
       statEditCommit();
-      // saveData 已经把 _filterSigCache 清掉了，这里补算一次
-      _currentList = getFilteredOrders();
+      // ★ 关键：改完之后，这一单可能已经【不符合当前筛选】了
+      //   （例如筛"待处理"，把状态改成了"已发货"），必须立刻把它从列表移除，
+      //   否则它会一直赖在页面上，要刷新才消失（用户反馈的问题）。
+      const wasInList = _currentList.some(x => x.id === orderId);
+      _filterSigCache = null; _renderListCache = null;
+      const newList = getFilteredOrders();
+      const nowInList = newList.some(x => x.id === orderId);
+      _currentList = newList;
+      if (wasInList !== nowInList) {
+        // 该单"进出筛选结果"了 → 整个窗口要重排，不能再只刷一行
+        winCacheClear();
+        _listSig = '';
+        _needRepaint = true;
+        render();
+        paintStats();
+        if (wasInList) showToast('ℹ️ 该订单已不符合当前筛选，已从列表移除');
+        else showToast('ℹ️ 该订单现在符合筛选条件了，已加入列表');
+        return;
+      }
       paintStats();
       if (!refreshOrderRow(orderId)) {
         render();     // 该行不在当前窗口里（比如被筛选掉了），退回整体刷新
@@ -7361,7 +7583,7 @@
     bootstrap();
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.09.13-20'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.09.13-21'; // 每次修改系统时改一下版本号即可触发更新
     let pendingSW = null;
 
     // 注意：file:// 协议下 SW 无法注册（浏览器限制），仅在 http(s):// 和 localhost 下启用
