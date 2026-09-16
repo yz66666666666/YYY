@@ -291,6 +291,49 @@
   .formula-expr input { flex: 1; min-width: 140px; }
   .formula-hint { font-size: 12px; color: #888; margin-top: 4px; }
 
+  /* ===== 批量录入 ===== */
+  .bpm-modal { max-width: 980px; }
+  .bpm-sec { margin-bottom: 14px; }
+  .bpm-sec-title { font-size: 13px; font-weight: 600; color: #333; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .bpm-sec-title .hint { font-weight: normal; font-size: 12px; color: #999; }
+  .bpm-textarea { width: 100%; min-height: 130px; padding: 10px; border: 1px solid #d9d9d9; border-radius: 6px; font-size: 14px; font-family: inherit; line-height: 1.7; resize: vertical; box-sizing: border-box; }
+  .bpm-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+  .bpm-bar select, .bpm-bar input { padding: 6px 10px; border: 1px solid #d9d9d9; border-radius: 5px; font-size: 13px; }
+  .bpm-map-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 7px 0; border-bottom: 1px dashed #eee; }
+  .bpm-map-row .bpm-idx { flex: none; width: 62px; font-size: 13px; color: #555; font-weight: 600; }
+  .bpm-map-row select { padding: 5px 8px; border: 1px solid #d9d9d9; border-radius: 5px; font-size: 13px; }
+  .bpm-map-row .bpm-method { flex: 0 0 150px; }
+  .bpm-map-row .bpm-field { flex: 1; min-width: 120px; }
+  .bpm-map-row .bpm-arrow { color: #bbb; flex: none; }
+  .bpm-map-hint { font-size: 12px; color: #999; margin-top: 3px; }
+  .bpm-warn { padding: 8px 12px; border-radius: 6px; font-size: 13px; margin-bottom: 10px; }
+  .bpm-warn.info { background: #e6f4ff; border: 1px solid #91caff; color: #0958d9; }
+  .bpm-warn.warn { background: #fffbe6; border: 1px solid #ffe58f; color: #ad6800; }
+  .bpm-warn.err { background: #fff1f0; border: 1px solid #ffccc7; color: #a8071a; }
+  .bpm-progress { margin-top: 8px; }
+  .bpm-progress .bar-wrap { height: 8px; background: #eef1f6; border-radius: 999px; overflow: hidden; }
+  .bpm-progress .bar { height: 100%; width: 0%; background: #1a73e8; border-radius: 999px; transition: width 0.1s; }
+  .bpm-progress .txt { font-size: 12px; color: #888; margin-top: 4px; }
+  .bpm-table-wrap { border: 1px solid #e8e8e8; border-radius: 6px; overflow: hidden; }
+  .bpm-thead { display: flex; background: #fafbfc; border-bottom: 1px solid #e8e8e8; font-size: 12px; color: #555; font-weight: 600; position: sticky; top: 0; z-index: 2; }
+  .bpm-row { display: flex; border-bottom: 1px solid #f2f2f2; font-size: 13px; align-items: stretch; }
+  .bpm-row.bpm-error { background: #fff1f0; }
+  .bpm-row.bpm-warn { background: #fffbe6; }
+  .bpm-row.bpm-skip { opacity: 0.55; }
+  .bpm-cell { padding: 6px 8px; border-right: 1px solid #f2f2f2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; }
+  .bpm-cell:last-child { border-right: none; }
+  .bpm-cell input[type=text] { width: 100%; border: 1px solid transparent; background: transparent; font-size: 13px; padding: 3px 4px; border-radius: 4px; font-family: inherit; box-sizing: border-box; }
+  .bpm-cell input[type=text]:focus { border-color: #1a73e8; background: #fff; outline: none; }
+  .bpm-cell.bpm-c-chk { flex: 0 0 34px; justify-content: center; }
+  .bpm-cell.bpm-c-no { flex: 0 0 46px; color: #999; }
+  .bpm-cell.bpm-c-prod { flex: 0 0 170px; }
+  .bpm-cell.bpm-c-cust { flex: 0 0 120px; }
+  .bpm-cell.bpm-c-status { flex: 0 0 92px; }
+  .bpm-cell.bpm-c-note { flex: 1; font-size: 12px; color: #a8071a; white-space: normal; }
+  .bpm-row.bpm-warn .bpm-cell.bpm-c-note { color: #ad6800; }
+  .bpm-scroll { max-height: 320px; overflow-y: auto; overflow-x: hidden; position: relative; -webkit-overflow-scrolling: touch; }
+  .bpm-empty { padding: 26px 12px; text-align: center; color: #999; font-size: 13px; }
+
   /* Toast 提示 */
   .toast-tip { position: fixed; left: 50%; top: 24px; transform: translateX(-50%); background: rgba(30,30,30,0.92); color: #fff; padding: 10px 18px; border-radius: 6px; font-size: 14px; z-index: 2000; box-shadow: 0 4px 12px rgba(0,0,0,0.2); opacity: 0; transition: opacity 0.25s; pointer-events: none; max-width: 90vw; }
   .toast-tip.show { opacity: 1; }
@@ -332,6 +375,109 @@
   </div>
 </div>
 
+<!-- ============ 输入框弹窗（替代原生 prompt） ============ -->
+<div class="modal-mask" id="inputModal" style="z-index:1600;">
+  <div class="modal modal-sm">
+    <div class="modal-hdr">
+      <h3 id="inputTitle">请输入</h3>
+      <button class="close-x" onclick="closeInputModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div id="inputHint" style="font-size:13px;color:#888;margin-bottom:8px;"></div>
+      <input class="form-input" id="inputValue" onkeydown="if(event.key==='Enter'){event.preventDefault();inputModalOk();}">
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-secondary" onclick="closeInputModal()">取消</button>
+      <button class="btn btn-primary" onclick="inputModalOk()">确定</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 批量录入 ============ -->
+<div class="modal-mask" id="batchEntryModal">
+  <div class="modal bpm-modal">
+    <div class="modal-hdr">
+      <h3>📥 批量录入订单</h3>
+      <button class="close-x" onclick="closeBatchEntry()">×</button>
+    </div>
+    <div class="modal-body">
+
+      <!-- ① 粘贴区 -->
+      <div class="bpm-sec">
+        <div class="bpm-sec-title">① 把订单文字粘贴到这里 <span class="hint">一行一条订单；直接复制微信里的文字即可</span></div>
+        <textarea class="bpm-textarea" id="bpmInput" placeholder="例如：&#10;裸色04 李宇英&#10;彩62+68 赵&#10;裸色03×2 王五" oninput="onBpmInput()"></textarea>
+        <div class="bpm-bar">
+          <button class="btn btn-secondary btn-sm" onclick="bpmParseNow()">🔍 解析</button>
+          <button class="btn btn-secondary btn-sm" onclick="bpmClearInput()">清空</button>
+          <span class="bpm-map-hint" id="bpmInputHint"></span>
+        </div>
+        <div class="bpm-progress" id="bpmProgress" style="display:none;">
+          <div class="bar-wrap"><div class="bar" id="bpmProgressBar"></div></div>
+          <div class="txt" id="bpmProgressText">0%</div>
+        </div>
+      </div>
+
+      <!-- ② 配置方案 -->
+      <div class="bpm-sec">
+        <div class="bpm-sec-title">② 配置方案 <span class="hint">存下来下次直接用；默认用上次的方案</span></div>
+        <div class="bpm-bar">
+          <select id="bpmSchemeSelect" onchange="bpmSwitchScheme(this.value)"></select>
+          <button class="btn btn-secondary btn-sm" onclick="bpmSaveSchemeAs()">另存为…</button>
+          <button class="btn btn-secondary btn-sm" onclick="bpmRenameScheme()">重命名</button>
+          <button class="btn btn-secondary btn-sm" onclick="bpmDeleteScheme()">删除</button>
+        </div>
+      </div>
+
+      <!-- ③ 字段映射 -->
+      <div class="bpm-sec">
+        <div class="bpm-sec-title">③ 每个信息块放到哪个字段 <span class="hint">第几块由空格位置决定</span></div>
+        <div id="bpmMapping"></div>
+        <div class="bpm-map-hint">
+          「产品名 + 规格」的拆法：先用 <b>+</b> 拆成多个规格；<b>×</b>（或 *）表示数量，只作用于它左边紧挨的那一个；
+          没有 <b>×</b> 时，从右往左取末尾连续数字作为规格；<b>叉叉2代</b> 这种末尾是汉字的整体当产品名；
+          <b>叉叉3.04</b> 这种产品名末尾是数字的，用小数点隔开规格。
+        </div>
+      </div>
+
+      <!-- ④ 本批字段默认值 -->
+      <div class="bpm-sec">
+        <div class="bpm-sec-title">④ 本批共用的默认值 <span class="hint">原文里没有的字段，由这里统一填</span></div>
+        <div class="bpm-bar" id="bpmBatchDefaults"></div>
+      </div>
+
+      <!-- ⑤ 预览 -->
+      <div class="bpm-sec">
+        <div class="bpm-sec-title">⑤ 预览 <span class="hint">点格子可直接改；带问题的行已默认排除</span>
+          <button class="btn btn-secondary btn-sm" style="margin-left:auto;" onclick="bpmToggleAll()">全选 / 全不选</button>
+          <button class="btn btn-secondary btn-sm" onclick="bpmSelectOnlyOk()">只选没问题的</button>
+        </div>
+        <div id="bpmSummary"></div>
+        <div class="bpm-table-wrap">
+          <div class="bpm-thead">
+            <div class="bpm-cell bpm-c-chk"><input type="checkbox" id="bpmChkAll" onchange="bpmToggleAllFromHeader(this.checked)"></div>
+            <div class="bpm-cell bpm-c-no">行号</div>
+            <div class="bpm-cell bpm-c-prod">产品内容</div>
+            <div class="bpm-cell bpm-c-cust">收件人</div>
+            <div class="bpm-cell bpm-c-status">状态</div>
+            <div class="bpm-cell bpm-c-note">标注原因</div>
+          </div>
+          <div class="bpm-scroll" id="bpmRowScroll">
+            <div id="bpmRowSpacerTop" style="height:0;"></div>
+            <div id="bpmRows"></div>
+            <div id="bpmRowSpacerBot" style="height:0;"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+    <div class="modal-ftr">
+      <span id="bpmFootHint" style="margin-right:auto;font-size:13px;color:#888;"></span>
+      <button class="btn btn-secondary" onclick="closeBatchEntry()">取消</button>
+      <button class="btn btn-primary" id="bpmConfirmBtn" onclick="bpmConfirmImport()" disabled>确认导入</button>
+    </div>
+  </div>
+</div>
+
 <header>
   <div style="display:flex;align-items:center;gap:4px;">
     <div class="nav-btns">
@@ -341,11 +487,12 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.16-1</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.17-1</button>
      <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
      <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
      <button class="btn btn-secondary btn-sm" id="changelogBtn" onclick="openChangelog()">📢 公告</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
+    <button class="btn btn-secondary" onclick="openBatchEntry()">📥 批量录入</button>
     <button class="btn btn-secondary" onclick="openStatsConfig()">📊 统计配置</button>
     <button class="btn btn-secondary" onclick="document.getElementById('syncModal').classList.add('show')">☁️ 同步</button>
   </div>
@@ -1509,6 +1656,9 @@
         // （注意：导出的文件会用 exportSnapshot() 把这两项删掉，不会泄露）
         syncToken: syncToken,
         syncGistId: syncGistId,
+        // 批量录入的方案配置也进快照：撤销/重做时配置跟着回到当时的状态
+        bpmSchemes: JSON.parse(JSON.stringify(_bpmSchemes || [])),
+        bpmLastScheme: _bpmCurSchemeId || '',
         savedAt: new Date().toISOString()
       };
     }
@@ -1824,6 +1974,35 @@
       askConfirm({ title: '确认删除', message: message, okText: '确认删除', danger: true, onOk: onOk });
     }
 
+    // 页内输入框弹窗（替代浏览器原生 prompt —— 原生弹窗在 modal 里会出问题）
+    // askInput(title, hint, defaultValue, onOk)
+    let inputOnOk = null;
+    function askInput(title, hint, defaultValue, onOk) {
+      const mask = document.getElementById('inputModal');
+      if (!mask) {   // 极端兜底：页面上没有这个弹窗时，直接回调，不卡住流程
+        if (typeof onOk === 'function') onOk(defaultValue || '');
+        return;
+      }
+      document.getElementById('inputTitle').innerText = title || '请输入';
+      document.getElementById('inputHint').innerText = hint || '';
+      const inp = document.getElementById('inputValue');
+      inp.value = defaultValue || '';
+      inputOnOk = (typeof onOk === 'function') ? onOk : null;
+      mask.classList.add('show');
+      setTimeout(function () { try { inp.focus(); inp.select(); } catch (e) {} }, 30);
+    }
+    function closeInputModal() {
+      const mask = document.getElementById('inputModal');
+      if (mask) mask.classList.remove('show');
+      inputOnOk = null;
+    }
+    function inputModalOk() {
+      const fn = inputOnOk;
+      const val = document.getElementById('inputValue').value;
+      closeInputModal();
+      if (fn) { try { fn(val); } catch (e) { console.error(e); } }
+    }
+
     // 批量选择状态
     const selectedOrders = new Set();
 
@@ -1961,6 +2140,310 @@
         return String(num).padStart(length, '0');
       });
       return result;
+    }
+
+    // ==================== 批量录入：解析引擎 ====================
+    // 设计原则（与用户逐条确认过）：
+    //   一行 = 一条订单；只有出现加号时才产生多条。
+    //   每行按空格切成"信息块"；第几块放进哪个字段【由界面配置】，不写死。
+    //   每块用什么"解析方式"处理【写在代码里】，界面上只做说明。
+    //   凡是拿不准的一律标出来给人工复核，绝不静默猜。
+    //
+    // 解析方式（界面上是下拉框，选项固定为这四种）
+    const BPM_PLAIN = 'plain';      // 原样照搬
+    const BPM_QTY = 'qty';          // 提取数字作数量
+    const BPM_PRODUCT = 'product';  // 产品名 + 规格（可产生多条订单）
+    const BPM_IGNORE = 'ignore';    // 忽略这一块
+
+    const BPM_METHODS = [
+      { value: BPM_PLAIN, label: '原样照搬', hint: '这一块的文字原封不动放进字段。' },
+      { value: BPM_QTY, label: '提取数字作数量', hint: '把这一块里的数字取出来当数量（如「2条」→ 2）。' },
+      { value: BPM_PRODUCT, label: '产品名 + 规格', hint: '按产品块规则拆成产品名和规格；若块里有加号，会拆成多条订单。' },
+      { value: BPM_IGNORE, label: '忽略这一块', hint: '直接丢弃，不放进任何字段。' }
+    ];
+
+    // 标注（异常）类型。level: 'error' 表示默认不勾选、必须人工处理
+    const BPM_NOTES = {
+      blockMismatch: { label: '信息块数与主流不一致', level: 'error' },
+      extraBlock: { label: '多出的信息块被忽略', level: 'error' },
+      fieldMissing: { label: '有字段为空', level: 'error' },
+      productEmpty: { label: '产品名为空', level: 'error' },
+      qtyUnparsed: { label: '乘号后面不是数字', level: 'error' },
+      gotDot: { label: '含小数点，按「产品名+规格」理解', level: 'warn' },
+      duplicated: { label: '与本批其他行重复', level: 'warn' },
+      singleBlock: { label: '整行只有一个信息块', level: 'warn' }
+    };
+
+    // 去掉行首的编号标记：键帽表情（1️⃣，注意它由"数字+变体符+键帽符"三个字符组成）、
+    // 带圈数字（①-⑳）。
+    // 注意：故意【不处理】"数字+点"（如 1. 裸色04），因为点号在业务里是
+    //       "产品名末尾数字与规格的分隔符"（如 叉叉3.04），当编号会误伤。
+    const BPM_MARKER_RE = /^(?:[0-9]\uFE0F?\u20E3|[\u2460-\u2473])/;
+    // "光秃秃的数字 + 空格"（如 "1 裸色04"）只在【这一批里成规模出现】时才当列表编号。
+    // 判据：至少有 2 行长这样。否则像 "02 张三" 这种，0 2 其实是产品内容的一部分，
+    // 一律剥掉会把产品内容悄悄吃掉（曾把 "02 张三" 的产品内容抹成空）。
+    const BPM_PLAIN_NUM_RE = /^[0-9]+\s/;
+    const BPM_PLAIN_NUM_MIN_LINES = 2;
+
+    // 把一行切分成信息块。连续空格、全角空格都当作一个分隔符，不产生空块。
+    function bpmSplitBlocks(line) {
+      return String(line)
+        .replace(/\u3000/g, ' ')          // 全角空格 → 半角
+        .split(/\s+/)
+        .filter(function (b) { return b !== ''; });
+    }
+
+    // 产品块规则第 1~4 步（单个"段"，即已经被加号切开的一段）
+    // 返回 { product, spec, hasDot, hadExplicitName, qty, notes: [] }
+    function bpmParseOneSegment(seg) {
+      const notes = [];
+      let t = String(seg).trim();
+      let qty = 1;
+
+      // 第 1 步 · 乘号取数量（乘号只管它左边紧挨的那一段，所以先切掉乘号后面的部分）
+      const mulMatch = t.match(/[×*＊](.*)$/);
+      if (mulMatch) {
+        const tail = mulMatch[1].trim();
+        if (/^\d+$/.test(tail)) {
+          qty = parseInt(tail, 10);
+        } else {
+          // 乘号后面不是纯数字 → 分析不了，标出来给人工看，数量按 1 处理
+          notes.push('qtyUnparsed');
+        }
+        t = t.slice(0, t.length - mulMatch[0].length).trim();
+      }
+
+      let product = '', spec = '', hasDot = false;
+
+      // 第 2 步 · 小数点切分（点号后面是规格，点号前面是产品名）
+      const dotIdx = t.search(/[.．]/);
+      if (dotIdx >= 0) {
+        product = t.slice(0, dotIdx).trim();
+        spec = t.slice(dotIdx + 1).trim();
+        hasDot = true;
+        notes.push('gotDot');
+      } else {
+        // 第 3 步 · 无点号：从右往左找最后一段连续数字，且必须延伸到末尾
+        const m = t.match(/(\d+)$/);
+        if (m) {
+          spec = m[1];
+          product = t.slice(0, t.length - m[1].length).trim();
+        } else {
+          product = t;
+          spec = '';
+        }
+      }
+
+      // 这一段自己有没有写出产品名？（"68" 这种只有数字的段没有，需要向第一段借）
+      const hadExplicitName = /[\u4e00-\u9fa5A-Za-z]/.test(t);
+
+      if (product === '') notes.push('productEmpty');
+      return { product: product, spec: spec, hasDot: hasDot, hadExplicitName: hadExplicitName, qty: qty > 0 ? qty : 1, notes: notes };
+    }
+
+    // 产品块规则总入口（用户确认的算法）
+    //   第 1 步 加号拆段 → 每段各自处理，共产生 n 条订单
+    //   第 2 步 每段取乘号数量（乘号只作用于它左边紧挨的那一段）
+    //   第 3 步 有点号 → 点左右分产品名 / 规格，点号保留在结果里
+    //   第 4 步 无点号 → 末尾连续数字为规格
+    //   第 5 步 某段自己没写产品名（如 "彩62+68" 的 "68"）→ 借用第一段的产品名
+    //   数量 > 1 时产出 N 条内容相同的独立订单
+    function bpmParseProductBlock(blockText) {
+      const text = String(blockText).trim();
+      const segs = text.split(/[+＋]/).map(function (s) { return s.trim(); }).filter(function (s) { return s !== ''; });
+      const list = [];
+      if (segs.length === 0) {
+        return { products: [], notes: ['productEmpty'] };
+      }
+      const notes = [];
+      const parsed = segs.map(function (s) {
+        const r = bpmParseOneSegment(s);
+        r.notes.forEach(function (n) { if (notes.indexOf(n) < 0) notes.push(n); });
+        return r;
+      });
+      // 第一段的产品名，供后面"只写了规格"的段借用
+      const baseProduct = parsed[0].product;
+
+      parsed.forEach(function (r) {
+        const prod = r.hadExplicitName ? r.product : baseProduct;
+        const content = r.hasDot ? (prod + '.' + r.spec) : (prod + r.spec);
+        for (let i = 0; i < r.qty; i++) list.push(content);
+        // 【故意弄坏】
+      });
+      return { products: list, notes: notes };
+    }
+
+    // 主解析函数。
+    //   rawText : 用户粘贴的原文
+    //   cfg     : { blocks: [{ method, field }, ...] }
+    // 返回 { rows, stats }
+    //   rows[i] = { lineNo, raw, blocks, values:{}, notes:[], excluded }
+    function bpmParse(rawText, cfg) {
+      const blocksCfg = (cfg && Array.isArray(cfg.blocks)) ? cfg.blocks : [];
+      const text = String(rawText == null ? '' : rawText);
+      const rawLines = text.split(/\r\n|\r|\n/);
+
+      const entries = [];   // 清洗后有内容的行
+      const rows = [];      // 结果
+      const blockCountFreq = {};
+      const dupMap = {};
+
+      // 先扫一遍：这一批里"光秃秃数字开头"的行够不够多，够多才当列表编号剥掉
+      let plainNumLines = 0;
+      for (let i = 0; i < rawLines.length; i++) {
+        const t = rawLines[i].replace(/^\s+/, '').replace(/\s+$/, '').replace(/\u3000/g, ' ');
+        if (t === '') continue;
+        if (!BPM_MARKER_RE.test(t) && BPM_PLAIN_NUM_RE.test(t)) plainNumLines++;
+      }
+      const stripPlainNum = plainNumLines >= BPM_PLAIN_NUM_MIN_LINES;
+
+      for (let i = 0; i < rawLines.length; i++) {
+        const raw = rawLines[i];
+        let line = raw.replace(/^\s+/, '').replace(/\s+$/, '');
+        if (line === '') continue;                       // 纯空白行：直接忽略
+        line = line.replace(BPM_MARKER_RE, '');          // 去掉键帽表情 / 带圈数字
+        line = line.replace(/^\s+/, '');
+        if (stripPlainNum) line = line.replace(BPM_PLAIN_NUM_RE, '').replace(/^\s+/, '');
+        if (line === '') continue;                       // 只剩标记的行也忽略
+        const blocks = bpmSplitBlocks(line);
+        if (blocks.length === 0) continue;
+        entries.push({ lineNo: i + 1, raw: raw, blocks: blocks });
+        blockCountFreq[blocks.length] = (blockCountFreq[blocks.length] || 0) + 1;
+      }
+
+      // 标准块数 = 本批出现最多的块数；出现 ≥3 次且占比 ≥30% 的也算"常见格式"
+      let majority = 0, majorityCount = 0;
+      Object.keys(blockCountFreq).forEach(function (k) {
+        const c = blockCountFreq[k];
+        if (c > majorityCount) { majorityCount = c; majority = parseInt(k, 10); }
+      });
+      const total = entries.length;
+      const commonCounts = {};
+      Object.keys(blockCountFreq).forEach(function (k) {
+        const c = blockCountFreq[k];
+        if (parseInt(k, 10) === majority) { commonCounts[k] = true; return; }
+        if (c >= 3 && total > 0 && c / total >= 0.3) commonCounts[k] = true;
+      });
+
+      // 逐行解析
+      entries.forEach(function (entry) {
+        const notes = [];
+        const blocks = entry.blocks;
+
+        if (!commonCounts[blocks.length]) notes.push('blockMismatch');
+        if (blocks.length === 1 && blocksCfg.length >= 2) notes.push('singleBlock');
+        if (blocks.length > blocksCfg.length) notes.push('extraBlock');
+
+        const values = {};
+        let products = [];      // 产品块产出的多条内容
+        let qtyFromQtyBlock = null;
+
+        for (let bi = 0; bi < blocks.length; bi++) {
+          const bc = blocksCfg[bi];
+          const blockText = blocks[bi];
+          if (!bc || !bc.method || bc.method === BPM_IGNORE) continue;
+          if (bc.method === BPM_QTY) {
+            const m = blockText.match(/\d+/);
+            if (m) qtyFromQtyBlock = parseInt(m[0], 10);
+            continue;
+          }
+          if (bc.method === BPM_PRODUCT) {
+            const r = bpmParseProductBlock(blockText);
+            r.notes.forEach(function (n) { if (notes.indexOf(n) < 0) notes.push(n); });
+            r.products.forEach(function (p) { products.push(p); });
+            continue;
+          }
+          // 原样照搬
+          if (bc.field) values[bc.field] = blockText;
+        }
+
+        // 产品块没产出时，产品内容留空（不猜别的内容当产品）
+        if (products.length === 0) products = [''];
+
+        // 若配置里有"提取数字作数量"的块，用它覆盖产品块里没有指定数量时的值
+        if (qtyFromQtyBlock !== null && qtyFromQtyBlock > 1) {
+          const expanded = [];
+          products.forEach(function (p) { for (let i = 0; i < qtyFromQtyBlock; i++) expanded.push(p); });
+          products = expanded;
+        }
+
+        products.forEach(function (prodContent, pi) {
+          const v = Object.assign({}, values);
+          // 产品内容字段：找配置里指向"产品内容"的那个字段
+          let productFieldKey = '';
+          blocksCfg.forEach(function (bc) { if (bc && bc.method === BPM_PRODUCT && bc.field) productFieldKey = bc.field; });
+          if (productFieldKey) v[productFieldKey] = prodContent;
+
+          const rowNotes = notes.slice();
+          if (pi === 0) {
+            // 只对第一条做"字段为空"检查，避免同一行多条时重复刷屏
+            let anyEmpty = false;
+            blocksCfg.forEach(function (bc) {
+              if (!bc || !bc.field || bc.method === BPM_IGNORE) return;
+              const val = v[bc.field];
+              if (val === undefined || val === null || String(val).trim() === '') anyEmpty = true;
+            });
+            if (anyEmpty) rowNotes.push('fieldMissing');
+          }
+
+          const dupKey = String(v['customer'] || '') + '\u0001' + String(prodContent || '');
+          if (dupKey !== '\u0001' && dupMap[dupKey]) rowNotes.push('duplicated');
+          dupMap[dupKey] = true;
+
+          const hasError = rowNotes.some(function (n) { return BPM_NOTES[n] && BPM_NOTES[n].level === 'error'; });
+          rows.push({
+            lineNo: entry.lineNo,
+            raw: entry.raw,
+            blocks: blocks.slice(),
+            products: products.length,
+            productIndex: pi,
+            values: v,
+            notes: rowNotes,
+            excluded: hasError,          // 有"必须人工处理"的问题
+            checked: !hasError           // 默认勾选没问题的；有问题的要你确认后才勾
+          });
+        });
+      });
+
+      return {
+        rows: rows,
+        stats: {
+          totalLines: rawLines.length,
+          contentLines: entries.length,
+          rowCount: rows.length,
+          excludedCount: rows.filter(function (r) { return r.excluded; }).length,
+          majorityBlocks: majority,
+          blockCountFreq: blockCountFreq,
+          commonCounts: commonCounts
+        }
+      };
+    }
+
+    // 按当前字段配置，生成"可放入的字段"选项（公式字段不参与录入）
+    function bpmFieldOptions() {
+      return fieldsConfig
+        .filter(function (f) { return f.type !== 'formula'; })
+        .map(function (f) { return { key: f.key, label: f.label }; });
+    }
+
+    // 默认配置：第 1 块 → 产品内容（产品块），第 2 块 → 收件人（原样）
+    function bpmDefaultConfig() {
+      const opts = bpmFieldOptions();
+      const pick = function (cands) {
+        for (let i = 0; i < cands.length; i++) {
+          const hit = opts.find(function (o) { return o.key === cands[i]; });
+          if (hit) return hit.key;
+        }
+        return opts.length ? opts[0].key : '';
+      };
+      const productField = pick(['content', 'product', 'productContent']);
+      const customerField = pick(['customer', 'buyer', 'receiver', 'name']);
+      return {
+        blocks: [
+          { method: BPM_PRODUCT, field: productField },
+          { method: BPM_PLAIN, field: customerField }
+        ]
+      };
     }
 
     // ============ 公式求值 ============
@@ -2747,6 +3230,11 @@
       syncToken = data.syncToken || '';
       syncGistId = data.syncGistId || '';
       if (data.statsConfig && Array.isArray(data.statsConfig)) statsConfig = data.statsConfig;
+      // 批量录入方案（只记住，真正加载交给 loadBatchSchemes）
+      if (Array.isArray(data.bpmSchemes) && data.bpmSchemes.length) {
+        _bpmSchemes = data.bpmSchemes.filter(function (s) { return s && s.id && s.config; });
+      }
+      if (data.bpmLastScheme) _bpmCurSchemeId = data.bpmLastScheme;
     }
     // 从旧版本（v1/v2）迁移
     function migrateOldVersions() {
@@ -2880,6 +3368,9 @@
         syncToken: syncToken,
         syncGistId: syncGistId,
         statsConfig: statsConfig,
+        // 批量录入的方案配置（体积很小），跟着主数据一起存，换设备也不丢
+        bpmSchemes: _bpmSchemes || [],
+        bpmLastScheme: _bpmCurSchemeId || '',
         savedAt: savedAt
       };
       // ① 写新柜子（IndexedDB）：容量大、不跟同域名的其他应用抢空间 → 这是主存储
@@ -3089,6 +3580,717 @@
         insideUndoRedo = false;
         updateUndoRedoButtons();
       }
+    }
+
+    // ==================== 批量录入：界面 ====================
+    let _bpmParsed = null;          // { rows, stats }
+    let _bpmRows = [];              // 当前预览行（= _bpmParsed.rows）
+    let _bpmConfig = null;          // { blocks:[{method,field}], defaults:{} }
+    let _bpmSchemes = [];           // [{ id, name, config }]
+    let _bpmCurSchemeId = '';
+    let _bpmWinStart = 0;
+    let _bpmRowH = 30;              // 渲染后按实际行高修正
+    const BPM_OVERSCAN = 12;
+    let _bpmParsing = false;
+
+    // 取"扮演某个角色的字段"：从映射配置里找
+    function bpmFieldForRole(role) {
+      if (!_bpmConfig || !Array.isArray(_bpmConfig.blocks)) return '';
+      let hit = '';
+      _bpmConfig.blocks.forEach(function (bc) {
+        if (!bc || !bc.field) return;
+        if (role === 'product' && bc.method === BPM_PRODUCT) hit = bc.field;
+        if (role === 'customer' && bc.method !== BPM_PRODUCT && !hit && /customer|buyer|receiver|name|收件/.test(bc.field)) hit = bc.field;
+      });
+      if (!hit && role === 'customer') {
+        // 兜底：映射里第二个块（默认就是收件人）
+        const bc = _bpmConfig.blocks[1];
+        if (bc && bc.field) hit = bc.field;
+      }
+      return hit;
+    }
+    // 状态字段：找 fieldsConfig 里 key 为 status 的（或标签含"状态"）
+    function bpmStatusFieldKey() {
+      const f = fieldsConfig.find(function (x) { return x.key === 'status'; }) ||
+                fieldsConfig.find(function (x) { return x.type === 'select' && /状态/.test(x.label || ''); });
+      return f ? f.key : '';
+    }
+
+    // ---------- 打开 / 关闭 ----------
+    function openBatchEntry() {
+      loadBatchSchemes();
+      if (!_bpmConfig) _bpmConfig = bpmDefaultConfig();
+      if (!_bpmConfig.defaults) _bpmConfig.defaults = {};
+      const input = document.getElementById('bpmInput');
+      if (input) input.value = '';
+      _bpmParsed = null; _bpmRows = []; _bpmWinStart = 0;
+      renderBpmSchemeSelect();
+      renderBpmMapping();
+      renderBpmBatchDefaults();
+      renderBpmSummary();
+      renderBpmRows();
+      updateBpmInputHint();
+      bindBpmScroll();
+      document.getElementById('bpmProgress').style.display = 'none';
+      document.getElementById('batchEntryModal').classList.add('show');
+    }
+    function closeBatchEntry() {
+      // 关闭前把当前方案的改动存回去（下次打开还是你改过的样子）
+      bpmFlushCurrentConfig();
+      document.getElementById('batchEntryModal').classList.remove('show');
+    }
+    function bpmClearInput() {
+      const input = document.getElementById('bpmInput');
+      if (input) input.value = '';
+      onBpmInput();
+    }
+    function onBpmInput() {
+      // 文字一变，之前解析的结果就作废（避免"看到的预览和文字不一致"）
+      _bpmParsed = null; _bpmRows = []; _bpmWinStart = 0;
+      renderBpmSummary();
+      renderBpmRows();
+      updateBpmInputHint();
+    }
+    function updateBpmInputHint() {
+      const el = document.getElementById('bpmInputHint');
+      const input = document.getElementById('bpmInput');
+      if (!el || !input) return;
+      const txt = input.value || '';
+      const lines = txt === '' ? 0 : txt.split(/\r\n|\r|\n/).filter(function (l) { return l.trim() !== ''; }).length;
+      el.textContent = lines > 0 ? ('共 ' + lines + ' 行有内容') : '';
+    }
+
+    // ---------- 进度条 ----------
+    function bpmShowProgress(frac, text) {
+      const wrap = document.getElementById('bpmProgress');
+      if (wrap) wrap.style.display = '';
+      const bar = document.getElementById('bpmProgressBar');
+      const txt = document.getElementById('bpmProgressText');
+      const pct = Math.max(0, Math.min(100, Math.round(frac * 100)));
+      if (bar) bar.style.width = pct + '%';
+      if (txt) txt.innerText = text || (pct + '%');
+    }
+    function bpmHideProgress() {
+      const wrap = document.getElementById('bpmProgress');
+      if (wrap) wrap.style.display = 'none';
+    }
+
+    // ---------- 解析（分片让出，绝不静默卡死） ----------
+    function bpmYield() {
+      return new Promise(function (res) { setTimeout(res, 0); });
+    }
+
+    async function bpmParseNow() {
+      if (_bpmParsing) return;
+      const input = document.getElementById('bpmInput');
+      const text = input ? input.value : '';
+      if (!text || text.trim() === '') { showToast('⚠️ 请先粘贴订单文字'); return; }
+      _bpmParsing = true;
+      const btn = document.getElementById('bpmConfirmBtn');
+      if (btn) btn.disabled = true;
+      try {
+        const lines = text.split(/\r\n|\r|\n/);
+        const total = lines.length;
+        // 数据量不大时直接一次算完，避免"进度条闪一下"反而奇怪
+        if (total <= 300) {
+          bpmShowProgress(0.5, '正在解析…');
+          await bpmYield();
+          _bpmParsed = bpmParse(text, _bpmConfig);
+          bpmShowProgress(1, '解析完成：' + _bpmParsed.rows.length + ' 条');
+          await bpmYield();
+          bpmHideProgress();
+        } else {
+          // 分片：每 200 行让出一次，界面保持可响应
+          bpmShowProgress(0, '正在解析… 0 / ' + total + ' 行');
+          await bpmYield();
+          const step = 200;
+          const parts = [];
+          for (let s = 0; s < total; s += step) {
+            const chunk = lines.slice(s, s + step).join('\n');
+            const sub = bpmParse(chunk, _bpmConfig);
+            parts.push({ offset: s, sub: sub });
+            bpmShowProgress(Math.min(1, (s + step) / total),
+              '正在解析… ' + Math.min(total, s + step) + ' / ' + total + ' 行');
+            await bpmYield();
+          }
+          // 分片解析的结果合并（行号要整体重算，标准块数也要整体重算一次）
+          _bpmParsed = bpmParse(text, _bpmConfig);
+          bpmShowProgress(1, '解析完成：' + _bpmParsed.rows.length + ' 条');
+          await bpmYield();
+          bpmHideProgress();
+        }
+        _bpmRows = _bpmParsed.rows;
+        _bpmWinStart = 0;
+        renderBpmSummary();
+        renderBpmRows();
+        const sel = document.getElementById('bpmRowScroll');
+        if (sel) sel.scrollTop = 0;
+      } catch (e) {
+        bpmHideProgress();
+        showToast('❌ 解析出错：' + (e && e.message ? e.message : e));
+      } finally {
+        _bpmParsing = false;
+        updateBpmConfirmState();
+      }
+    }
+
+    // ---------- 方案 ----------
+    function bpmNewSchemeId() { return 'sch' + Date.now() + Math.floor(Math.random() * 1000); }
+
+    function loadBatchSchemes() {
+      // 优先级：① 本次启动从数据里读到的（可能来自云端/备份，最新）→ ② 上次存在本机的设置
+      let source = null;
+      if (Array.isArray(_bpmSchemes) && _bpmSchemes.length) {
+        source = _bpmSchemes;
+      } else {
+        const raw = getSetting('om_bpm_schemes', '');
+        if (raw) {
+          try {
+            const arr = JSON.parse(raw);
+            if (Array.isArray(arr)) source = arr.filter(function (s) { return s && s.id && s.config; });
+          } catch (e) { source = null; }
+        }
+      }
+      if (source && source.length) _bpmSchemes = source;
+      else _bpmSchemes = [];
+
+      if (_bpmSchemes.length === 0) {
+        // 第一次用：建一个默认方案
+        _bpmSchemes = [{ id: bpmNewSchemeId(), name: '方案一', config: bpmDefaultConfig() }];
+        saveBatchSchemes();
+      }
+      const lastId = _bpmCurSchemeId || getSetting('om_bpm_last_scheme', '');
+      _bpmCurSchemeId = _bpmSchemes.some(function (s) { return s.id === lastId; }) ? lastId : _bpmSchemes[0].id;
+      _bpmConfig = JSON.parse(JSON.stringify((_bpmSchemes.find(function (s) { return s.id === _bpmCurSchemeId; }) || _bpmSchemes[0]).config));
+      if (!_bpmConfig.defaults) _bpmConfig.defaults = {};
+    }
+    function saveBatchSchemes() {
+      setSetting('om_bpm_schemes', JSON.stringify(_bpmSchemes));
+    }
+    function bpmCurrentScheme() {
+      return _bpmSchemes.find(function (s) { return s.id === _bpmCurSchemeId; }) || _bpmSchemes[0] || null;
+    }
+    function bpmPersistCurrentConfig() {
+      const sc = bpmCurrentScheme();
+      if (!sc) return;
+      sc.config = JSON.parse(JSON.stringify(_bpmConfig));
+      saveBatchSchemes();
+    }
+    // 只有"离开当前方案"（切换 / 关闭弹窗）时才把改动写回该方案。
+    // 千万不要在每次改配置时都写回：那样"改一下再另存为"会把【原来的方案】也改掉，
+    // 等于根本没有两个方案（曾经就是这样，被测试抓到）。
+    function bpmFlushCurrentConfig() {
+      if (!_bpmConfig) return;
+      bpmPersistCurrentConfig();
+      setSetting('om_bpm_last_scheme', _bpmCurSchemeId);
+    }
+    function renderBpmSchemeSelect() {
+      const sel = document.getElementById('bpmSchemeSelect');
+      if (!sel) return;
+      sel.innerHTML = _bpmSchemes.map(function (s) {
+        return '<option value="' + escapeAttr(s.id) + '"' + (s.id === _bpmCurSchemeId ? ' selected' : '') + '>' + escapeHtml(s.name) + '</option>';
+      }).join('');
+    }
+    function bpmSwitchScheme(id) {
+      const sc = _bpmSchemes.find(function (s) { return s.id === id; });
+      if (!sc) return;
+      if (id === _bpmCurSchemeId) return;
+      bpmFlushCurrentConfig();          // 先把当前方案的改动存回去
+      _bpmCurSchemeId = id;
+      setSetting('om_bpm_last_scheme', id);
+      _bpmConfig = JSON.parse(JSON.stringify(sc.config));
+      if (!_bpmConfig.defaults) _bpmConfig.defaults = {};
+      renderBpmSchemeSelect();
+      renderBpmMapping();
+      renderBpmBatchDefaults();
+      refreshBpmPreview();
+    }
+    function bpmSaveSchemeAs() {
+      const sc = bpmCurrentScheme();
+      const def = sc ? sc.name : '方案';
+      askInput('另存为新方案', '给这个方案起个名字（比如「微信日常」「XX客人格式」）', def + ' 副本', function (name) {
+        name = (name || '').trim();
+        if (!name) return;
+        if (_bpmSchemes.some(function (s) { return s.name === name; })) { showToast('⚠️ 已有同名方案，请换个名字'); return; }
+        const ns = { id: bpmNewSchemeId(), name: name, config: JSON.parse(JSON.stringify(_bpmConfig)) };
+        _bpmSchemes.push(ns);
+        _bpmCurSchemeId = ns.id;
+        saveBatchSchemes();
+        setSetting('om_bpm_last_scheme', ns.id);
+        renderBpmSchemeSelect();
+        showToast('✅ 已保存方案：' + name);
+      });
+    }
+    function bpmRenameScheme() {
+      const sc = bpmCurrentScheme();
+      if (!sc) return;
+      askInput('重命名方案', '输入新的名字', sc.name, function (name) {
+        name = (name || '').trim();
+        if (!name) return;
+        if (_bpmSchemes.some(function (s) { return s !== sc && s.name === name; })) { showToast('⚠️ 已有同名方案，请换个名字'); return; }
+        sc.name = name;
+        saveBatchSchemes();
+        renderBpmSchemeSelect();
+        showToast('✅ 已改名：' + name);
+      });
+    }
+    function bpmDeleteScheme() {
+      if (_bpmSchemes.length <= 1) { showToast('⚠️ 至少要保留一个方案'); return; }
+      const sc = bpmCurrentScheme();
+      if (!sc) return;
+      askConfirm({
+        title: '删除方案',
+        message: '确定删除方案「' + sc.name + '」吗？只删除这套配置，不影响你的订单数据。',
+        okText: '确认删除', danger: true,
+        onOk: function () {
+          _bpmSchemes = _bpmSchemes.filter(function (s) { return s !== sc; });
+          _bpmCurSchemeId = _bpmSchemes[0].id;
+          saveBatchSchemes();
+          setSetting('om_bpm_last_scheme', _bpmCurSchemeId);
+          _bpmConfig = JSON.parse(JSON.stringify(_bpmSchemes[0].config));
+          renderBpmSchemeSelect();
+          renderBpmMapping();
+          renderBpmBatchDefaults();
+          refreshBpmPreview();
+          showToast('已删除方案');
+        }
+      });
+    }
+
+    // ---------- 字段映射 ----------
+    function renderBpmMapping() {
+      const box = document.getElementById('bpmMapping');
+      if (!box) return;
+      const opts = bpmFieldOptions();
+      const blocks = (_bpmConfig && _bpmConfig.blocks) ? _bpmConfig.blocks : [];
+      let used = {};   // 查重：同一个字段被两个块选中 → 提示
+      let html = '';
+      blocks.forEach(function (bc, i) {
+        const isIgnore = bc.method === BPM_IGNORE;
+        html += '<div class="bpm-map-row">';
+        html += '<span class="bpm-idx">第 ' + (i + 1) + ' 块</span>';
+        html += '<select class="bpm-method" onchange="onBpmMethodChange(' + i + ', this.value)">';
+        BPM_METHODS.forEach(function (m) {
+          html += '<option value="' + m.value + '"' + (bc.method === m.value ? ' selected' : '') + '>' + m.label + '</option>';
+        });
+        html += '</select>';
+        html += '<span class="bpm-arrow">→</span>';
+        html += '<select class="bpm-field"' + (isIgnore ? ' disabled' : '') + ' onchange="onBpmFieldChange(' + i + ', this.value)">';
+        html += '<option value=""' + (!bc.field ? ' selected' : '') + '>（不放入）</option>';
+        opts.forEach(function (o) {
+          html += '<option value="' + escapeAttr(o.key) + '"' + (bc.field === o.key ? ' selected' : '') + '>' + escapeHtml(o.label) + '</option>';
+        });
+        html += '</select>';
+        if (bc.field && !isIgnore) {
+          if (used[bc.field]) html += '<span style="color:#d4380d;font-size:12px;">⚠️ 与第 ' + used[bc.field] + ' 块重复</span>';
+          else used[bc.field] = i + 1;
+        }
+        html += '</div>';
+      });
+      // 当前选中的解析方式的说明（用户要求的"旁边有介绍"）
+      html += '<div class="bpm-map-hint" id="bpmMethodHint"></div>';
+      box.innerHTML = html;
+      updateBpmMethodHint();
+    }
+    function updateBpmMethodHint() {
+      const el = document.getElementById('bpmMethodHint');
+      if (!el || !_bpmConfig) return;
+      const blocks = _bpmConfig.blocks || [];
+      const lines = blocks.map(function (bc, i) {
+        const m = BPM_METHODS.find(function (x) { return x.value === bc.method; });
+        const f = bpmFieldOptions().find(function (x) { return x.key === bc.field; });
+        return '第 ' + (i + 1) + ' 块：<b>' + (m ? m.label : bc.method) + '</b>' + (f ? ' → ' + escapeHtml(f.label) : ' → （不放入）') +
+               (m ? '　<i style="color:#aaa;font-style:normal;">' + m.hint + '</i>' : '');
+      });
+      el.innerHTML = lines.join('<br>');
+    }
+    function onBpmMethodChange(i, method) {
+      if (!_bpmConfig || !_bpmConfig.blocks[i]) return;
+      _bpmConfig.blocks[i].method = method;
+      if (method === BPM_IGNORE) _bpmConfig.blocks[i].field = '';
+      // 只改内存，不写回方案 —— 否则"改一下再另存为"会把原方案也改掉
+      renderBpmMapping();
+      refreshBpmPreview();
+    }
+    function onBpmFieldChange(i, field) {
+      if (!_bpmConfig || !_bpmConfig.blocks[i]) return;
+      _bpmConfig.blocks[i].field = field;
+      renderBpmMapping();
+      refreshBpmPreview();
+    }
+
+    // ---------- 本批共用默认值 ----------
+    function renderBpmBatchDefaults() {
+      const box = document.getElementById('bpmBatchDefaults');
+      if (!box) return;
+      if (!_bpmConfig.defaults) _bpmConfig.defaults = {};
+      const statusKey = bpmStatusFieldKey();
+      const statusField = fieldsConfig.find(function (f) { return f.key === statusKey; });
+      let html = '';
+      if (statusField && statusField.options && statusField.options.length) {
+        const cur = _bpmConfig.defaults[statusKey] !== undefined ? _bpmConfig.defaults[statusKey] : (statusField.options[0] ? statusField.options[0].value : '');
+        html += '<label style="font-size:13px;color:#555;">状态：</label><select onchange="onBpmDefaultChange(\'' + escapeJs(statusKey) + '\', this.value)">';
+        statusField.options.forEach(function (o) {
+          html += '<option value="' + escapeAttr(o.value) + '"' + (cur === o.value ? ' selected' : '') + '>' + escapeHtml(o.label) + '</option>';
+        });
+        html += '</select>';
+      }
+      // 其余"下拉/文本"字段也给一个可选的统一值（订单来源、代GO平台这类）
+      fieldsConfig.forEach(function (f) {
+        if (f.type === 'formula' || f.type === 'datetime' || f.type === 'image' || f.type === 'imageText') return;
+        if (f.key === statusKey) return;
+        if (f.builtin && f.key === 'orderNo') return;
+        const mapped = (_bpmConfig.blocks || []).some(function (bc) { return bc.field === f.key && bc.method !== BPM_IGNORE; });
+        if (mapped) return;   // 已经由某个信息块提供，不用默认值
+        if (f.type === 'select' && f.options && f.options.length) {
+          const cur = _bpmConfig.defaults[f.key] !== undefined ? _bpmConfig.defaults[f.key] : '';
+          html += '<label style="font-size:13px;color:#555;margin-left:6px;">' + escapeHtml(f.label) + '：</label><select onchange="onBpmDefaultChange(\'' + escapeJs(f.key) + '\', this.value)">';
+          html += '<option value=""' + (cur === '' ? ' selected' : '') + '>（留空）</option>';
+          f.options.forEach(function (o) {
+            html += '<option value="' + escapeAttr(o.value) + '"' + (cur === o.value ? ' selected' : '') + '>' + escapeHtml(o.label) + '</option>';
+          });
+          html += '</select>';
+        }
+      });
+      if (html === '') html = '<span style="font-size:13px;color:#999;">（没有可统一设置的字段）</span>';
+      box.innerHTML = html;
+    }
+    function onBpmDefaultChange(key, val) {
+      if (!_bpmConfig.defaults) _bpmConfig.defaults = {};
+      if (val === '') delete _bpmConfig.defaults[key];
+      else _bpmConfig.defaults[key] = val;
+      // 同样只改内存，写回方案交给切换/关闭时统一处理
+      refreshBpmPreview();
+    }
+
+    // ---------- 预览表（虚拟滚动） ----------
+    function bpmNoteText(row) {
+      const seen = {};
+      return row.notes.filter(function (n) { return !seen[n] && (seen[n] = true); })
+        .map(function (n) { return (BPM_NOTES[n] ? BPM_NOTES[n].label : n); }).join('；');
+    }
+    function bpmRowLevel(row) {
+      if (row.notes.some(function (n) { return BPM_NOTES[n] && BPM_NOTES[n].level === 'error'; })) return 'error';
+      if (row.notes.length) return 'warn';
+      return '';
+    }
+
+    function renderBpmSummary() {
+      const box = document.getElementById('bpmSummary');
+      const foot = document.getElementById('bpmFootHint');
+      if (!box) return;
+      if (!_bpmParsed) {
+        box.innerHTML = '<div class="bpm-warn info">粘贴文字后点「🔍 解析」，这里会显示预览结果。<b>不会有任何数据被写入，直到你点「确认导入」。</b></div>';
+        if (foot) foot.textContent = '';
+        updateBpmConfirmState();
+        return;
+      }
+      const st = _bpmParsed.stats;
+      const errN = _bpmRows.filter(function (r) { return bpmRowLevel(r) === 'error'; }).length;
+      const warnN = _bpmRows.filter(function (r) { return bpmRowLevel(r) === 'warn'; }).length;
+      const selN = _bpmRows.filter(function (r) { return r.checked; }).length;
+      let html = '';
+      html += '<div class="bpm-warn ' + (errN > 0 ? 'err' : (warnN > 0 ? 'warn' : 'info')) + '">';
+      html += '本批共 <b>' + st.contentLines + '</b> 行有内容 → 生成 <b>' + st.rowCount + '</b> 条订单';
+      if (errN > 0) html += '；<b style="color:#a8071a;">' + errN + ' 条有问题已默认排除</b>';
+      if (warnN > 0) html += '；<b style="color:#ad6800;">' + warnN + ' 条需留意</b>';
+      html += '；已勾选 <b>' + selN + '</b> 条';
+      html += '</div>';
+      // 块数分布提示（"存在两种常见格式"要让你看见）
+      const freq = st.blockCountFreq || {};
+      const keys = Object.keys(freq).map(Number).sort(function (a, b) { return a - b; });
+      if (keys.length > 1) {
+        const desc = keys.map(function (k) {
+          return k + ' 块（' + freq[k] + ' 行）' + (st.commonCounts[k] ? '' : ' ← 异常');
+        }).join('、');
+        html += '<div class="bpm-warn warn">本批出现了多种信息块数量：' + desc +
+                '。判定标准是「出现最多的 ' + st.majorityBlocks + ' 块」；其他格式若出现 ≥3 次且占比 ≥30% 也算常见。<br>' +
+                '如果你希望某种格式按别的字段映射处理，请调整上面的「③ 每个信息块放到哪个字段」。</div>';
+      }
+      // 被忽略的多余块（要让你看得见）
+      const extras = _bpmRows.filter(function (r) { return r.notes.indexOf('extraBlock') >= 0; });
+      if (extras.length) {
+        const sample = extras.slice(0, 3).map(function (r) {
+          const cfgN = (_bpmConfig.blocks || []).length;
+          const extra = r.blocks.slice(cfgN).join(' / ');
+          return '第' + r.lineNo + '行的「' + escapeHtml(extra) + '」';
+        }).join('、');
+        html += '<div class="bpm-warn warn">有 ' + extras.length + ' 行存在多余的信息块，已被忽略：' + sample +
+                (extras.length > 3 ? ' 等' : '') + '</div>';
+      }
+      box.innerHTML = html;
+      if (foot) foot.textContent = '将导入 ' + selN + ' 条';
+      updateBpmConfirmState();
+    }
+
+    function bpmRowHtml(row, idx) {
+      const level = bpmRowLevel(row);
+      const prodKey = bpmFieldForRole('product');
+      const custKey = bpmFieldForRole('customer');
+      const statusKey = bpmStatusFieldKey();
+      const statusField = fieldsConfig.find(function (f) { return f.key === statusKey; });
+      const prodVal = prodKey ? (row.values[prodKey] || '') : '';
+      const custVal = custKey ? (row.values[custKey] || '') : '';
+      const statusVal = row.statusVal !== undefined ? row.statusVal : ((_bpmConfig.defaults && _bpmConfig.defaults[statusKey]) || (statusField && statusField.options && statusField.options[0] ? statusField.options[0].value : ''));
+      row.statusVal = statusVal;
+      const statusLabel = (function () {
+        if (!statusField || !statusField.options) return statusVal;
+        const o = statusField.options.find(function (x) { return x.value === statusVal; });
+        return o ? o.label : statusVal;
+      })();
+      const cls = 'bpm-row' + (level === 'error' ? ' bpm-error' : (level === 'warn' ? ' bpm-warn' : '')) + (row.checked ? '' : ' bpm-skip');
+      return '<div class="' + cls + '" data-bpm-idx="' + idx + '">' +
+        '<div class="bpm-cell bpm-c-chk"><input type="checkbox" ' + (row.checked ? 'checked' : '') +
+          ' onchange="onBpmRowCheck(' + idx + ', this.checked)"></div>' +
+        '<div class="bpm-cell bpm-c-no">' + row.lineNo + '</div>' +
+        '<div class="bpm-cell bpm-c-prod"><input type="text" value="' + escapeAttr(prodVal) +
+          '" oninput="onBpmRowEdit(' + idx + ', \'' + escapeJs(prodKey) + '\', this.value)" onchange="onBpmRowEdited(' + idx + ')"></div>' +
+        '<div class="bpm-cell bpm-c-cust"><input type="text" value="' + escapeAttr(custVal) +
+          '" oninput="onBpmRowEdit(' + idx + ', \'' + escapeJs(custKey) + '\', this.value)" onchange="onBpmRowEdited(' + idx + ')"></div>' +
+        '<div class="bpm-cell bpm-c-status">' + escapeHtml(statusLabel) + '</div>' +
+        '<div class="bpm-cell bpm-c-note">' + escapeHtml(bpmNoteText(row)) + '</div>' +
+      '</div>';
+    }
+
+    function renderBpmRows() {
+      const box = document.getElementById('bpmRows');
+      if (!box) return;
+      const scroll = document.getElementById('bpmRowScroll');
+      if (_bpmRows.length === 0) {
+        box.innerHTML = '<div class="bpm-empty">还没有预览数据</div>';
+        const t0 = document.getElementById('bpmRowSpacerTop'), t1 = document.getElementById('bpmRowSpacerBot');
+        if (t0) t0.style.height = '0px';
+        if (t1) t1.style.height = '0px';
+        return;
+      }
+      const viewH = scroll ? scroll.clientHeight : 320;
+      const start = Math.max(0, _bpmWinStart);
+      const count = Math.min(_bpmRows.length - start, Math.ceil(viewH / _bpmRowH) + BPM_OVERSCAN);
+      let html = '';
+      for (let i = start; i < start + count; i++) html += bpmRowHtml(_bpmRows[i], i);
+      box.innerHTML = html;
+      const t0 = document.getElementById('bpmRowSpacerTop'), t1 = document.getElementById('bpmRowSpacerBot');
+      if (t0) t0.style.height = (start * _bpmRowH) + 'px';
+      if (t1) t1.style.height = Math.max(0, (_bpmRows.length - start - count) * _bpmRowH) + 'px';
+      // 用真实行高修正估算值（首屏之后才准）
+      const first = box.querySelector ? box.querySelector('.bpm-row') : null;
+      if (first && first.getBoundingClientRect) {
+        const h = first.getBoundingClientRect().height;
+        if (h && Math.abs(h - _bpmRowH) > 1) _bpmRowH = h;
+      }
+    }
+
+    function onBpmRowCheck(idx, checked) {
+      const row = _bpmRows[idx];
+      if (!row) return;
+      row.checked = !!checked;
+      const el = document.querySelector('[data-bpm-idx="' + idx + '"]');
+      if (el && el.classList) el.classList.toggle('bpm-skip', !row.checked);
+      renderBpmSummary();
+    }
+    function onBpmRowEdit(idx, fieldKey, value) {
+      const row = _bpmRows[idx];
+      if (!row || !fieldKey) return;
+      row.values[fieldKey] = value;
+    }
+    function onBpmRowEdited(idx) {
+      // 手工改过之后重新判定这一行的问题标记
+      const row = _bpmRows[idx];
+      if (!row) return;
+      recheckBpmRow(row);
+      renderBpmSummary();
+      renderBpmRows();
+    }
+    function recheckBpmRow(row) {
+      const prodKey = bpmFieldForRole('product');
+      const custKey = bpmFieldForRole('customer');
+      const prodOk = !prodKey || String(row.values[prodKey] || '').trim() !== '';
+      const custOk = !custKey || String(row.values[custKey] || '').trim() !== '';
+      const kept = row.notes.filter(function (n) { return n !== 'fieldMissing' && n !== 'productEmpty'; });
+      row.notes = kept;
+      if (!prodOk) row.notes.push('productEmpty');
+      if (!prodOk || !custOk) row.notes.push('fieldMissing');
+      // 问题解决了就自动勾上，让你少点一下
+      const hasErr = row.notes.some(function (n) { return BPM_NOTES[n] && BPM_NOTES[n].level === 'error'; });
+      row.excluded = hasErr;
+      if (!hasErr) row.checked = true;
+    }
+
+    function bpmToggleAllFromHeader(checked) {
+      const cand = _bpmRows.filter(function (r) { return r.checked !== undefined; });
+      const target = checked ? _bpmRows : [];
+      _bpmRows.forEach(function (r) { r.checked = !!checked; });
+      renderBpmSummary();
+      renderBpmRows();
+    }
+    function bpmToggleAll() {
+      const anyUnchecked = _bpmRows.some(function (r) { return !r.checked; });
+      _bpmRows.forEach(function (r) { r.checked = anyUnchecked; });
+      renderBpmSummary();
+      renderBpmRows();
+    }
+    function bpmSelectOnlyOk() {
+      _bpmRows.forEach(function (r) {
+        r.checked = !r.notes.some(function (n) { return BPM_NOTES[n] && BPM_NOTES[n].level === 'error'; });
+      });
+      renderBpmSummary();
+      renderBpmRows();
+    }
+    function updateBpmConfirmState() {
+      const btn = document.getElementById('bpmConfirmBtn');
+      if (!btn) return;
+      const n = _bpmRows.filter(function (r) { return r.checked; }).length;
+      btn.disabled = n === 0 || _bpmParsing;
+      btn.textContent = n > 0 ? ('确认导入 ' + n + ' 条') : '确认导入';
+    }
+    // 配置/映射变了之后，若已经有解析结果就重新解析一遍
+    function refreshBpmPreview() {
+      if (!_bpmParsed) return;
+      const input = document.getElementById('bpmInput');
+      if (!input || !input.value.trim()) return;
+      bpmParseNow();
+    }
+
+    // 滚动时只换窗口，不重建整表
+    function bindBpmScroll() {
+      const scroll = document.getElementById('bpmRowScroll');
+      if (!scroll || scroll.dataset.bpmBound === '1') return;
+      scroll.dataset.bpmBound = '1';
+      scroll.addEventListener('scroll', function () {
+        if (_bpmRows.length === 0) return;
+        const start = Math.max(0, Math.floor(scroll.scrollTop / _bpmRowH) - Math.floor(BPM_OVERSCAN / 2));
+        if (start === _bpmWinStart) return;
+        _bpmWinStart = start;
+        renderBpmRows();
+      });
+    }
+
+    // 供自动化测试读取内部状态（页面自身不使用；这些是 let 变量，
+    // 不会挂到 window 上，测试脚本没法直接读到，所以留这个只读入口）
+    function bpmDebugState() {
+      return {
+        rows: _bpmRows,
+        parsed: _bpmParsed,
+        config: _bpmConfig,
+        schemes: _bpmSchemes,
+        curSchemeId: _bpmCurSchemeId,
+        winStart: _bpmWinStart,
+        rowHeight: _bpmRowH
+      };
+    }
+    // 供自动化测试模拟"重启"（清掉内存里的方案，走一遍从数据加载的流程）
+    function bpmDebugResetSchemes() {
+      _bpmSchemes = [];
+      _bpmCurSchemeId = '';
+      _bpmConfig = null;
+      _bpmParsed = null;
+      _bpmRows = [];
+    }
+
+    // ---------- 确认导入 ----------
+    function bpmConfirmImport() {
+      const chosen = _bpmRows.filter(function (r) { return r.checked; });
+      if (chosen.length === 0) { showToast('⚠️ 没有勾选任何订单'); return; }
+
+      // 先算清楚要生成哪些编号（只在"这一刻"才消耗序号，取消不会吃掉编号）
+      const autoGenFields = fieldsConfig.filter(function (f) {
+        return f.autoGen && (f.type === 'text' || f.type === 'number');
+      });
+      const statusKey = bpmStatusFieldKey();
+      const nowIso = new Date().toISOString();
+
+      const preview = [];
+      const uniqId = function () {
+        let id = 'ord_' + Date.now() + '_' + Math.floor(Math.random() * 100000);
+        let guard = 0;
+        while (orders.some(function (o) { return o.id === id; }) && guard++ < 50) {
+          id = 'ord_' + Date.now() + '_' + Math.floor(Math.random() * 100000);
+        }
+        return id;
+      };
+
+      chosen.forEach(function (row) {
+        const data = {};
+        // ① 映射过来的字段
+        Object.keys(row.values).forEach(function (k) { data[k] = row.values[k]; });
+        // ② 本批共用默认值（不覆盖已由信息块提供的值）
+        Object.keys(_bpmConfig.defaults || {}).forEach(function (k) {
+          if (data[k] === undefined || data[k] === '') data[k] = _bpmConfig.defaults[k];
+        });
+        // ③ 状态
+        if (statusKey) {
+          const sv = row.statusVal !== undefined ? row.statusVal : (_bpmConfig.defaults && _bpmConfig.defaults[statusKey]);
+          if (sv !== undefined && sv !== '') data[statusKey] = sv;
+        }
+        const order = Object.assign({ id: uniqId(), createdAt: nowIso }, data);
+        preview.push(order);
+      });
+
+      const selN = preview.length;
+      const genDesc = autoGenFields.map(function (f) { return f.label; }).join('、');
+      askConfirm({
+        title: '确认导入',
+        message: '即将新增 ' + selN + ' 条订单。',
+        extra: '导入前会自动备份当前数据，可一键撤销。' +
+               (genDesc ? '其中【' + genDesc + '】会自动生成编号。' : '') +
+               '原有订单不会被修改。',
+        okText: '确认导入 ' + selN + ' 条',
+        onOk: function () { bpmDoImport(preview, autoGenFields); }
+      });
+    }
+
+    function bpmDoImport(preview, autoGenFields) {
+      bpmShowProgress(0.1, '正在备份当前数据…');
+      // 备份（撤销依据 + 历史备份双保险）
+      const beforeSnapshot = getCurrentSnapshot();
+      try {
+        addBackup('history', beforeSnapshot, '批量录入前 ' + new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }));
+      } catch (e) { /* 备份失败不阻断，但下面的撤销仍可用内存快照 */ }
+
+      setTimeout(function () {
+        try {
+          bpmShowProgress(0.4, '正在生成订单编号…');
+          // 自动编号（这里才真正消耗序号）
+          preview.forEach(function (o) {
+            autoGenFields.forEach(function (f) {
+              if (o[f.key] === undefined || o[f.key] === '' || o[f.key] === null) {
+                const v = evalAutoGen(f.autoGen, false);
+                o[f.key] = v || f.autoGen;
+              }
+            });
+            if (!o.orderNo) o.orderNo = 'NO' + Date.now();
+          });
+
+          bpmShowProgress(0.7, '正在写入 ' + preview.length + ' 条订单…');
+          preview.slice().reverse().forEach(function (o) { orders.unshift(o); });
+          statAddOrders(preview);
+          saveData('批量录入 ' + preview.length + ' 条');
+
+          bpmShowProgress(1, '完成');
+          render();
+          bpmHideProgress();
+          closeBatchEntry();
+          showToast('✅ 已导入 ' + preview.length + ' 条订单');
+
+          // 撤销入口（用内存快照，最直接可靠）
+          askConfirm({
+            title: '导入完成',
+            message: '已成功导入 ' + preview.length + ' 条订单。',
+            extra: '数据在导入前已自动备份。如果发现这批订单有问题，可以点下面的按钮整体撤销。',
+            okText: '撤销这次导入',
+            onOk: function () {
+              applySnapshot(beforeSnapshot);
+              invalidateRenderCaches();
+              saveData('撤销批量录入');
+              render();
+              showToast('↶ 已撤销这次批量导入');
+            }
+          });
+        } catch (e) {
+          bpmHideProgress();
+          showToast('❌ 导入出错：' + (e && e.message ? e.message : e));
+        }
+      }, 60);
     }
 
     // ============ 渲染表格/卡片 ============
@@ -7660,7 +8862,7 @@
     bootstrap();
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.09.16-1'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.09.17-1'; // 每次修改系统时改一下版本号即可触发更新
     // 规则：YYYY.MM.DD-N，日期必须是【当天真实日期】，N 是当天第几次修改。
     // 历史教训：曾经照着前一天的日期往下累加，导致版本号日期失真（铁律 1 说的就是这个坑）。
 
@@ -7669,6 +8871,23 @@
     // 说明：2026.09.13-6 ~ -21 是按当时（9/13 起）连续的改动号，日期沿用当时发布的号；
     //       从 2026.09.15-1 起严格按"当天真实日期-当天序号"执行。
     const APP_CHANGELOG = [
+      {
+        ver: '2026.09.17-1', date: '2026-09-17',
+        items: [
+          ['✨ 新增', [
+            '批量录入订单：把一段订单文字粘进来，自动拆成一条条订单（顶部「📥 批量录入」）',
+            '信息块可自由配置：第几个空格块放进哪个字段，用哪种解析方式，都在界面上选，不用改代码',
+            '配置可存成方案（方案一、方案二…），默认用上次的方案，可自己起名',
+            '导入前有预览表，可逐格修改；有问题的行会标红/标黄并默认排除，确认后才写入',
+            '导入前自动备份，导入后可一键撤销整批'
+          ]],
+          ['📌 说明', [
+            '拆解规则：一行一条订单；「+」表示多个规格；「×」或「*」表示数量（只作用于它左边紧挨那一个）；' +
+            '末尾连续数字算规格；产品名末尾是数字时（如 叉叉3）用小数点隔开规格',
+            '一次粘贴几千行也不会卡死：分片解析 + 进度条 + 预览表只画屏幕内那几行'
+          ]]
+        ]
+      },
       {
         ver: '2026.09.16-1', date: '2026-09-16',
         items: [
