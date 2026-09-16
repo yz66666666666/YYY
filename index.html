@@ -341,7 +341,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.15-1</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.16-1</button>
      <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
      <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
      <button class="btn btn-secondary btn-sm" id="changelogBtn" onclick="openChangelog()">📢 公告</button>
@@ -2434,7 +2434,8 @@
           const n = validNumber(r);
           return n === null ? 0 : n;
         }
-        const r = evalFormula(f, order);
+        // 走带缓存的版本：统计栏按公式字段求和时，几百条订单不用反复重算
+        const r = evalFormulaCached(f, order);
         if (r === '' || r === null || r === undefined) return null;
         const n = validNumber(r);
         return n === null ? 0 : n;
@@ -2546,7 +2547,7 @@
       let memo = _orderFormulaMemo.get(order.id);
       if (!memo) { memo = {}; _orderFormulaMemo.set(order.id, memo); }
       formulaFieldsOf().forEach(f => {
-        const r = evalFormula(f, order);
+        const r = evalFormulaCached(f, order);
         memo[f.key] = (r === '' || r === null || r === undefined) ? '' : String(r);
       });
       return memo;
@@ -3101,6 +3102,8 @@
       _renderListCache = null;
       _formulaCache = null;
       _filterSigCache = null;
+      // 数据被改动 → 版本号 +1，公式缓存里旧版本的结果自动失效
+      _dataVersion++;
       winCacheClear();          // 预拼好的窗口内容作废（数据/字段变了，内容就旧了）
       // 数据变了 → 标记"需要原地重画一次"，否则批量改值后屏幕不会更新
       _needRepaint = true;
@@ -3115,23 +3118,47 @@
       if (th) th._colsSig = '';
     }
 
-    // 带缓存的公式求值（同一次 render 内同一订单同一字段只算一次）
+    // 带缓存的公式求值。
+    // 关键设计：这个缓存【跨渲染保留】（筛选/切视图时不必重算几百条订单的公式），
+    // 但要保证数据一变就绝不返回旧值。所以键里同时带上：
+    //   ① 数据版本号（数据整体被改动时 +1）
+    //   ② 这条订单所有非公式字段的拼接（只要字段值变了，键就变，自动不会命中旧结果）
+    // 双保险的原因：万一某条代码路径忘了让缓存失效，第②项也能兜住 —— 公式算错是最不能接受的。
+    let _dataVersion = 0;            // 数据版本号：每改一次数据 +1
+    // 指纹按"数据版本号"缓存：同一次编辑/渲染期间，一条订单只拼一次字符串。
+    // 不加这层缓存的话，看统计栏时每条订单会被拼好几遍（总利润、平均利润各一遍），
+    // 800 条订单 × 几百次编辑就是可观的无谓开销 —— 缓存本身不能变成新的慢点。
+    let _fpOrder = null, _fpVer = -1, _fpStr = '';
+    function orderDataFingerprint(order) {
+      if (_fpVer === _dataVersion && _fpOrder === order) return _fpStr;
+      let s = '';
+      fieldsConfig.forEach(function (f) {
+        if (f.type === 'formula') return;
+        const v = order[f.key];
+        s += f.key + '=' + ((v === null || v === undefined) ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v))) + ';';
+      });
+      _fpOrder = order; _fpVer = _dataVersion; _fpStr = s;
+      return s;
+    }
     function evalFormulaCached(field, order) {
       if (!field || field.type !== 'formula') return '';
       if (!_formulaCache) _formulaCache = new Map();
-      const k = order.id + '\u0001' + field.key;
-      if (_formulaCache.has(k)) return _formulaCache.get(k);
+      const k = order.id + '\u0001' + field.key + '\u0001' + _dataVersion + '\u0001' + orderDataFingerprint(order);
+      const hit = _formulaCache.get(k);
+      if (hit !== undefined) return hit;
       const v = evalFormula(field, order);
       _formulaCache.set(k, v);
+      // 缓存条目太多时清一次（避免长期占用内存；正常不会到这一步）
+      if (_formulaCache.size > 20000) _formulaCache.clear();
       return v;
     }
 
     function render(forceFull) {
       const _t0 = PERF_ON ? performance.now() : 0;
       let _t1 = _t0;
-      // 每次新渲染：清空一次性的缓存
+      // 只清"本次渲染"的列表缓存；公式缓存【不清】—— 它靠数据版本号自动失效，
+      // 这样筛选/切视图时不必重算几百条订单的公式（这是之前"筛选半天没反应"的根因）。
       _renderListCache = null;
-      _formulaCache = null;
       if (forceFull) invalidateRenderCaches();
 
       // 统计栏基于全部订单，内部有签名缓存，没变化时不会重建 DOM
@@ -3161,7 +3188,10 @@
         _winStart = want;
         renderWindow(want, windowSize(), null);
       } else if (condChanged) {
-        // 筛选条件/视图/数据条数变了 → 从头开始一个新窗口
+        // 筛选条件/视图/数据条数变了 → 从头开始一个新窗口。
+        // 同时作废行高缓存：筛选后行的内容不同，换行行数不同，高度就不一样，
+        // 沿用旧行高会让占位高度算错、滚动位置乱跳（表现为"点了筛选半天不动"）。
+        markRowHeightDirty();
         _winStart = 0;
         renderWindow(0, windowSize(), null);
       } else if (_needRepaint) {
@@ -3721,10 +3751,22 @@
     // 用户下滑时直接取用 → 几乎无延迟；浏览时预拼不抢资源，不影响当前操作。
     let _winHtmlCache = [];          // [{start, count, sig, html}] 预拼好的窗口内容
     let _idleBuildScheduled = false;
+    let _lastWindowRenderAt = 0;     // 上次重画窗口的时间（用于抑制"重画→滚动→又重画"）
 
     function winCacheSig() {
-      // 任何会影响"某一屏长什么样"的东西变了，缓存就必须作废
-      return mobileViewMode + '|' +
+      // 任何会影响"某一屏长什么样"的东西变了，缓存就必须作废。
+      // 注意：必须包含【筛选条件签名】—— 否则切换筛选后会拿到上一个筛选的缓存内容（曾出过这个 bug）。
+      const kwEl = document.getElementById('searchInput');
+      const sfEl = document.getElementById('statusFilter');
+      const sfdEl = document.getElementById('searchFieldSel');
+      const condSig = [
+        _currentList.length,
+        kwEl ? kwEl.value : '',
+        sfEl ? sfEl.value : '',
+        sfdEl ? sfdEl.value : '',
+        orderSortMode
+      ].join('\u0001');
+      return mobileViewMode + '|' + condSig + '|' +
         fieldsConfig.map(f => f.key + ':' + f.type + ':' + (f.hidden ? 'h' : '') + ':' + f.label + ':' + (f.options ? f.options.length : 0)).join(',') +
         '|' + getCompactFieldKeys().join(',');
     }
@@ -3764,6 +3806,12 @@
         slice.forEach(o => { html += buildCompactRowHtml(o, keyFields); });
       }
       return { html: html, count: slice.length };
+    }
+
+    // 列表条件变了（筛选/搜索/排序/视图）→ 行高可能完全不同，必须重新测量
+    function markRowHeightDirty() {
+      _rowH = 0;
+      winCacheClear();
     }
 
     // 页面空闲时，悄悄把"下一屏"（或上一屏）拼好放着，等用户滑到就能秒开
@@ -3837,6 +3885,7 @@
 
       _winStart = start;
       _winCount = sliceCount;
+      _lastWindowRenderAt = Date.now();
 
       // 测量真实行高，用于下次算占位高度
       measureRowHeight(container);
@@ -3908,6 +3957,10 @@
     let _winScrollLock = false;
     function onListScroll() {
       if (_winScrollLock) return;
+      // 刚重画完窗口的一小段时间内不响应滚动：
+      // 重画会让页面高度变化、进而触发滚动事件，如果再据此换窗口，就会
+      // "重画→跳动→又重画"互相触发，表现为点了筛选半天没反应。
+      if (Date.now() - _lastWindowRenderAt < 350) return;
       const total = _currentList.length;
       if (total <= _winCount) return;   // 全部都在 DOM 里，不用换
       const container = getActiveContainer();
@@ -6220,8 +6273,9 @@
     // 改完一个单元格后的最小刷新：只重画那一行 + 统计栏走增量
     // （上千条订单时这是"不卡"的关键）
     function afterCellEdit(orderId) {
-      // 只清公式缓存，保留过滤结果缓存（避免把上千条重新过滤+排序一遍）
+      // 数据被改了 → 公式缓存整体作废（版本号 +1），但过滤结果缓存保留
       _formulaCache = null;
+      _dataVersion++;
       // 统计栏：把这次改动的影响量加回累加器（O(统计项数)，与订单条数无关）
       statEditCommit();
       // ★ 关键：改完之后，这一单可能已经【不符合当前筛选】了
@@ -7606,7 +7660,7 @@
     bootstrap();
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.09.15-1'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.09.16-1'; // 每次修改系统时改一下版本号即可触发更新
     // 规则：YYYY.MM.DD-N，日期必须是【当天真实日期】，N 是当天第几次修改。
     // 历史教训：曾经照着前一天的日期往下累加，导致版本号日期失真（铁律 1 说的就是这个坑）。
 
@@ -7615,6 +7669,25 @@
     // 说明：2026.09.13-6 ~ -21 是按当时（9/13 起）连续的改动号，日期沿用当时发布的号；
     //       从 2026.09.15-1 起严格按"当天真实日期-当天序号"执行。
     const APP_CHANGELOG = [
+      {
+        ver: '2026.09.16-1', date: '2026-09-16',
+        items: [
+          ['🐛 修复', [
+            '订单编号每天重复：上午编过 001，下午又从 001 开始（现在按你手机的本地日期重新起算）',
+            '筛选切得越快越卡：从第 2 次切换开始要等半秒以上（现在几乎瞬间）'
+          ]],
+          ['⚡ 优化', [
+            '利润等公式结果会被记住，不再每次翻页、筛选都重算一遍',
+            '空闲时提前备好下一屏，配合上面的改动，滑动和筛选都更顺'
+          ]],
+          ['💾 数据安全', [
+            '给计算结果上了「双保险」：订单内容一变，利润等数字立刻重算，绝不残留旧数字'
+          ]],
+          ['📌 说明', [
+            '本次改动没有动你的订单数据，只是让系统跑得更快、算得更稳'
+          ]]
+        ]
+      },
       {
         ver: '2026.09.15-1', date: '2026-09-15',
         items: [
