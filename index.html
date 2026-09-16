@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -292,7 +292,12 @@
   .formula-hint { font-size: 12px; color: #888; margin-top: 4px; }
 
   /* ===== 批量录入 ===== */
-  .bpm-modal { max-width: 980px; }
+  /* 弹窗必须有【确定高度】而不是只有 max-height：
+     否则里面的「预览滚动区」量不到自己的高度，虚拟滚动就会算错行号 ——
+     表现就是"滚动条在动、内容不刷新"。 */
+  .bpm-modal { max-width: 980px; height: 92vh; max-height: 92vh; }
+  .bpm-modal .modal-body { display: flex; flex-direction: column; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .bpm-modal .modal-body > .bpm-sec:last-child { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
   .bpm-sec { margin-bottom: 14px; }
   .bpm-sec-title { font-size: 13px; font-weight: 600; color: #333; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .bpm-sec-title .hint { font-weight: normal; font-size: 12px; color: #999; }
@@ -315,23 +320,43 @@
   .bpm-progress .bar { height: 100%; width: 0%; background: #1a73e8; border-radius: 999px; transition: width 0.1s; }
   .bpm-progress .txt { font-size: 12px; color: #888; margin-top: 4px; }
   .bpm-table-wrap { border: 1px solid #e8e8e8; border-radius: 6px; overflow: hidden; }
-  .bpm-thead { display: flex; background: #fafbfc; border-bottom: 1px solid #e8e8e8; font-size: 12px; color: #555; font-weight: 600; position: sticky; top: 0; z-index: 2; }
+  .bpm-thead { display: flex; background: #fafbfc; border-bottom: 1px solid #e8e8e8; font-size: 12px; color: #555; font-weight: 600; }
   .bpm-row { display: flex; border-bottom: 1px solid #f2f2f2; font-size: 13px; align-items: stretch; }
   .bpm-row.bpm-error { background: #fff1f0; }
   .bpm-row.bpm-warn { background: #fffbe6; }
-  .bpm-row.bpm-skip { opacity: 0.55; }
-  .bpm-cell { padding: 6px 8px; border-right: 1px solid #f2f2f2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; }
+  .bpm-row.bpm-skip { opacity: 0.5; }
+  .bpm-cell { padding: 5px 6px; border-right: 1px solid #f2f2f2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; flex: 1 1 0; }
   .bpm-cell:last-child { border-right: none; }
-  .bpm-cell input[type=text] { width: 100%; border: 1px solid transparent; background: transparent; font-size: 13px; padding: 3px 4px; border-radius: 4px; font-family: inherit; box-sizing: border-box; }
+  .bpm-cell input[type=text] { width: 100%; border: 1px solid transparent; background: transparent; font-size: 13px; padding: 3px 4px; border-radius: 4px; font-family: inherit; box-sizing: border-box; min-width: 0; }
   .bpm-cell input[type=text]:focus { border-color: #1a73e8; background: #fff; outline: none; }
-  .bpm-cell.bpm-c-chk { flex: 0 0 34px; justify-content: center; }
-  .bpm-cell.bpm-c-no { flex: 0 0 46px; color: #999; }
-  .bpm-cell.bpm-c-prod { flex: 0 0 170px; }
-  .bpm-cell.bpm-c-cust { flex: 0 0 120px; }
-  .bpm-cell.bpm-c-status { flex: 0 0 92px; }
-  .bpm-cell.bpm-c-note { flex: 1; font-size: 12px; color: #a8071a; white-space: normal; }
+  /* 各列宽度用"比例"而不是固定像素：
+     手机上总宽只有约 360px，原来固定占掉 462px（34+46+170+120+92），
+     结果标注列被挤没、整行撑出屏幕，而且父容器 overflow-x:hidden → 左右滑不动。
+     改成 flex 比例后自动适配任何屏宽；only 窄屏才隐藏次要列。 */
+  .bpm-cell.bpm-c-chk { flex: 0 0 30px; padding-left: 2px; padding-right: 2px; justify-content: center; }
+  .bpm-cell.bpm-c-no { flex: 0 0 34px; color: #999; padding-left: 2px; padding-right: 2px; }
+  .bpm-cell.bpm-c-prod { flex: 2 1 0; }
+  .bpm-cell.bpm-c-cust { flex: 1.4 1 0; }
+  .bpm-cell.bpm-c-status { flex: 1.2 1 0; }
+  .bpm-cell.bpm-c-note { flex: 1.6 1 0; font-size: 12px; color: #a8071a; }
   .bpm-row.bpm-warn .bpm-cell.bpm-c-note { color: #ad6800; }
-  .bpm-scroll { max-height: 320px; overflow-y: auto; overflow-x: hidden; position: relative; -webkit-overflow-scrolling: touch; }
+  /* 窄屏（手机）：列宽比例一样，但表格整体更宽松，标注列不再挤 */
+  @media (max-width: 560px) {
+    .bpm-cell { padding: 4px 3px; font-size: 12px; }
+    .bpm-cell input[type=text] { font-size: 12px; padding: 3px 2px; }
+    .bpm-cell.bpm-c-chk { flex: 0 0 26px; }
+    .bpm-cell.bpm-c-no { flex: 0 0 26px; font-size: 11px; }
+    .bpm-cell.bpm-c-status { display: none; }   /* 手机上状态默认都一样，先让位给内容 */
+    .bpm-thead .bpm-cell.bpm-c-status { display: none; }
+    .bpm-modal { height: 96vh; max-height: 96vh; border-radius: 10px; }
+    .bpm-modal .modal-hdr { padding: 10px 12px; }
+    .bpm-modal .modal-body { padding: 10px 12px; }
+    .bpm-modal .modal-ftr { padding: 8px 12px; flex-wrap: wrap; gap: 6px; }
+    .bpm-textarea { min-height: 96px; }
+    .bpm-scroll { max-height: 38vh; }
+    .bpm-sec { margin-bottom: 10px; }
+  }
+  .bpm-scroll { max-height: 320px; min-height: 150px; overflow-y: auto; overflow-x: hidden; position: relative; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
   .bpm-empty { padding: 26px 12px; text-align: center; color: #999; font-size: 13px; }
 
   /* Toast 提示 */
@@ -487,7 +512,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.17-1</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.17-2</button>
      <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
      <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
      <button class="btn btn-secondary btn-sm" id="changelogBtn" onclick="openChangelog()">📢 公告</button>
@@ -3589,9 +3614,16 @@
     let _bpmSchemes = [];           // [{ id, name, config }]
     let _bpmCurSchemeId = '';
     let _bpmWinStart = 0;
-    let _bpmRowH = 30;              // 渲染后按实际行高修正
+    let _bpmRowH = 0;               // 每行实际高度（渲染后用 offsetHeight 量出来）
+    const BPM_EST_ROW_H = 29;       // 还没量到之前的估算值
     const BPM_OVERSCAN = 12;
     let _bpmParsing = false;
+    let _bpmResizeBound = false;
+
+    // 当前行高：优先用实测值。用 0 会让 Math.ceil(viewH/0)=Infinity 之类的怪事，
+    // 用估算值则会在"手机上行比较高"时把窗口算到很远的行去 —— 那就是
+    // 用户看到的"滑块在动、页面内容不刷新"。
+    function bpmRowHeight() { return _bpmRowH > 0 ? _bpmRowH : BPM_EST_ROW_H; }
 
     // 取"扮演某个角色的字段"：从映射配置里找
     function bpmFieldForRole(role) {
@@ -3633,6 +3665,9 @@
       bindBpmScroll();
       document.getElementById('bpmProgress').style.display = 'none';
       document.getElementById('batchEntryModal').classList.add('show');
+      // 显示之后再量高度（显示前 clientHeight 是 0，会让窗口算错）
+      setTimeout(onBpmModalShown, 0);
+      setTimeout(onBpmModalShown, 120);
     }
     function closeBatchEntry() {
       // 关闭前把当前方案的改动存回去（下次打开还是你改过的样子）
@@ -4056,27 +4091,48 @@
       const box = document.getElementById('bpmRows');
       if (!box) return;
       const scroll = document.getElementById('bpmRowScroll');
+      const t0 = document.getElementById('bpmRowSpacerTop'), t1 = document.getElementById('bpmRowSpacerBot');
       if (_bpmRows.length === 0) {
         box.innerHTML = '<div class="bpm-empty">还没有预览数据</div>';
-        const t0 = document.getElementById('bpmRowSpacerTop'), t1 = document.getElementById('bpmRowSpacerBot');
         if (t0) t0.style.height = '0px';
         if (t1) t1.style.height = '0px';
         return;
       }
-      const viewH = scroll ? scroll.clientHeight : 320;
-      const start = Math.max(0, _bpmWinStart);
-      const count = Math.min(_bpmRows.length - start, Math.ceil(viewH / _bpmRowH) + BPM_OVERSCAN);
+      const rowH = bpmRowHeight();
+      // clientHeight 在弹窗还没显示时可能是 0 → 用保底高度，保证至少画得出内容
+      const viewH = (scroll && scroll.clientHeight > 60) ? scroll.clientHeight : 320;
+      const visible = Math.ceil(viewH / rowH) + BPM_OVERSCAN;
+      const maxStart = Math.max(0, _bpmRows.length - visible);
+      const start = Math.min(Math.max(0, _bpmWinStart), maxStart);
+      _bpmWinStart = start;
+      const count = Math.min(_bpmRows.length - start, visible);
       let html = '';
       for (let i = start; i < start + count; i++) html += bpmRowHtml(_bpmRows[i], i);
       box.innerHTML = html;
-      const t0 = document.getElementById('bpmRowSpacerTop'), t1 = document.getElementById('bpmRowSpacerBot');
-      if (t0) t0.style.height = (start * _bpmRowH) + 'px';
-      if (t1) t1.style.height = Math.max(0, (_bpmRows.length - start - count) * _bpmRowH) + 'px';
-      // 用真实行高修正估算值（首屏之后才准）
-      const first = box.querySelector ? box.querySelector('.bpm-row') : null;
-      if (first && first.getBoundingClientRect) {
-        const h = first.getBoundingClientRect().height;
-        if (h && Math.abs(h - _bpmRowH) > 1) _bpmRowH = h;
+      if (t0) t0.style.height = (start * rowH) + 'px';
+      if (t1) t1.style.height = Math.max(0, (_bpmRows.length - start - count) * rowH) + 'px';
+      // 用真实行高修正估算值（offsetHeight 不受缩放影响，比 getBoundingClientRect 可靠）
+      const first = box.firstChild;
+      if (first && first.offsetHeight > 0) {
+        const h = first.offsetHeight;
+        if (h !== _bpmRowH) {
+          _bpmRowH = h;
+          // 行高变了，之前按旧行高算的位置要重算一次，否则会显示错位
+          const wantStart = Math.max(0, Math.min(
+            Math.floor((scroll ? scroll.scrollTop : 0) / h) - Math.floor(BPM_OVERSCAN / 2),
+            Math.max(0, _bpmRows.length - (Math.ceil(viewH / h) + BPM_OVERSCAN))
+          ));
+          if (wantStart !== _bpmWinStart) {
+            _bpmWinStart = wantStart;
+            const v2 = Math.ceil(viewH / h) + BPM_OVERSCAN;
+            const c2 = Math.min(_bpmRows.length - wantStart, v2);
+            let h2 = '';
+            for (let i = wantStart; i < wantStart + c2; i++) h2 += bpmRowHtml(_bpmRows[i], i);
+            box.innerHTML = h2;
+            if (t0) t0.style.height = (wantStart * h) + 'px';
+            if (t1) t1.style.height = Math.max(0, (_bpmRows.length - wantStart - c2) * h) + 'px';
+          }
+        }
       }
     }
 
@@ -4094,12 +4150,19 @@
       row.values[fieldKey] = value;
     }
     function onBpmRowEdited(idx) {
-      // 手工改过之后重新判定这一行的问题标记
+      // 改了内容之后重新判定这一行的问题标记。
+      // 注意：**只重画这一行**，不要整表重画 —— 手机上整表重画会明显卡顿。
       const row = _bpmRows[idx];
       if (!row) return;
       recheckBpmRow(row);
+      const el = document.querySelector('[data-bpm-idx="' + idx + '"]');
+      if (el && el.parentNode) {
+        const wrap = document.createElement('div');
+        wrap.innerHTML = bpmRowHtml(row, idx);
+        const fresh = wrap.firstChild;
+        if (fresh) el.parentNode.replaceChild(fresh, el);
+      }
       renderBpmSummary();
-      renderBpmRows();
     }
     function recheckBpmRow(row) {
       const prodKey = bpmFieldForRole('product');
@@ -4152,17 +4215,51 @@
     }
 
     // 滚动时只换窗口，不重建整表
+    // 单独抽成函数：里面的"窗口起点夹紧"逻辑是防"滑块在动、内容不刷新"的关键，必须能被测试直接调用。
+    function bpmOnScroll() {
+      if (_bpmRows.length === 0) return;
+      const scroll = document.getElementById('bpmRowScroll');
+      if (!scroll) return;
+      const rowH = bpmRowHeight();
+      const viewH = scroll.clientHeight > 60 ? scroll.clientHeight : 320;
+      const visible = Math.ceil(viewH / rowH) + BPM_OVERSCAN;
+      const start = Math.max(0, Math.min(
+        Math.floor(scroll.scrollTop / rowH) - Math.floor(BPM_OVERSCAN / 2),
+        Math.max(0, _bpmRows.length - visible)   // 夹紧：滚到底不能越界，否则屏幕一片空白
+      ));
+      // 提前返回的条件必须同时满足"窗口没变"和"DOM 里确实有内容"。
+      // 只看窗口是否变化是不够的：万一 DOM 因故空了（清空、异常、被别的代码覆盖），
+      // 而窗口起点碰巧没变，就会直接 return 不重画 —— 屏幕持续空白，
+      // 看起来就是"滚动条在动、页面没反应"。
+      const box = document.getElementById('bpmRows');
+      const domEmpty = !box || !box.firstChild;
+      if (start === _bpmWinStart && !domEmpty) return;
+      _bpmWinStart = start;
+      renderBpmRows();
+    }
     function bindBpmScroll() {
       const scroll = document.getElementById('bpmRowScroll');
       if (!scroll || scroll.dataset.bpmBound === '1') return;
       scroll.dataset.bpmBound = '1';
-      scroll.addEventListener('scroll', function () {
-        if (_bpmRows.length === 0) return;
-        const start = Math.max(0, Math.floor(scroll.scrollTop / _bpmRowH) - Math.floor(BPM_OVERSCAN / 2));
-        if (start === _bpmWinStart) return;
-        _bpmWinStart = start;
-        renderBpmRows();
-      });
+      scroll.addEventListener('scroll', bpmOnScroll);
+    }
+    // 弹窗尺寸变化（横竖屏切换、手机地址栏收起）时，重新按新高度算窗口。
+    // 不绑定这个的话，弹窗"从隐藏变显示"那一刻量到的高度是 0，窗口会算错。
+    function bindBpmResize() {
+      if (_bpmResizeBound) return;
+      _bpmResizeBound = true;
+      const onResize = function () {
+        _bpmRowH = 0;            // 强制重量一次行高（字体/换行可能随宽度变化）
+        if (_bpmRows.length) renderBpmRows();
+      };
+      window.addEventListener('resize', onResize);
+      window.addEventListener('orientationchange', function () { setTimeout(onResize, 250); });
+    }
+    function onBpmModalShown() {
+      // 弹窗显示后再量一次：显示前 clientHeight 是 0
+      bindBpmResize();
+      _bpmRowH = 0;
+      if (_bpmRows.length) renderBpmRows();
     }
 
     // 供自动化测试读取内部状态（页面自身不使用；这些是 let 变量，
@@ -4186,6 +4283,8 @@
       _bpmParsed = null;
       _bpmRows = [];
     }
+    // 供自动化测试设置滚动窗口起点（同样因为 let 变量挂不到 window 上）
+    function bpmDebugSetWinStart(n) { _bpmWinStart = n; }
 
     // ---------- 确认导入 ----------
     function bpmConfirmImport() {
@@ -8862,7 +8961,7 @@
     bootstrap();
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.09.17-1'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.09.17-2'; // 每次修改系统时改一下版本号即可触发更新
     // 规则：YYYY.MM.DD-N，日期必须是【当天真实日期】，N 是当天第几次修改。
     // 历史教训：曾经照着前一天的日期往下累加，导致版本号日期失真（铁律 1 说的就是这个坑）。
 
@@ -8871,6 +8970,20 @@
     // 说明：2026.09.13-6 ~ -21 是按当时（9/13 起）连续的改动号，日期沿用当时发布的号；
     //       从 2026.09.15-1 起严格按"当天真实日期-当天序号"执行。
     const APP_CHANGELOG = [
+      {
+        ver: '2026.09.17-2', date: '2026-09-17',
+        items: [
+          ['🐛 修复', [
+            '批量录入预览在手机上：行被撑得超宽、标注列看不见（列宽改成按比例分配）',
+            '批量录入预览：滚动条在动但列表不刷新，甚至一片空白（虚拟滚动行高算错 + 窗口越界）',
+            '批量录入预览：改一个格子会整表重画，手机上明显卡顿（改成只重画那一行）'
+          ]],
+          ['⚡ 优化', [
+            '批量录入弹窗在手机上改为满屏高度，预览区高度自适应，竖屏横屏都能用',
+            '手机上自动隐藏「状态」列（默认值都一样），把宽度让给产品内容和标注'
+          ]]
+        ]
+      },
       {
         ver: '2026.09.17-1', date: '2026-09-17',
         items: [
