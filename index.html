@@ -44,6 +44,15 @@
     max-width: 170px;
     line-height: 1.5;
   }
+  /* 数字类（价格、进价、利润…）绝不允许在中间断开。
+     原因：overflow-wrap:anywhere 会让列一窄就把 48.75 拆成 "48.7"+"5"，看起来像两个数。
+     做法两条一起上：
+       ① white-space: nowrap —— 数字内部不换行；
+       ② min-width: 6ch       —— 给数字列一个下限宽度，装不下就整列变宽，而不是压窄后拆开。
+     只靠 ① 不够：表格会为了塞下所有列把某一列压到比数字还窄，然后照样溢出/换行。 */
+  #ordersTbody td.cell-num,
+  #ordersTbody td.cell-num span { white-space: nowrap; }
+  #ordersTbody td.cell-num { min-width: 6ch; }
   /* 多行文本字段保留原有换行符 */
   #ordersTbody td .cell-wrap-text { white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
   /* 订单编号、状态这类短内容不需要占满上限，给个更紧的宽度更好看 */
@@ -527,7 +536,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.17-3</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.17-4</button>
      <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
      <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
      <button class="btn btn-secondary btn-sm" id="changelogBtn" onclick="openChangelog()">📢 公告</button>
@@ -5377,6 +5386,12 @@
 
     // ============ 单行构建器（列表渲染和"改一格只刷一行"共用） ============
     // 改一个单元格时，不必重建整个列表——只重建那一行就够了，省掉绝大部分开销。
+    // 数字类字段（价格、进价、利润…）的列要"整列保持一行、不许在数字中间断开"，
+    // 用 cell-num 这个 class 标记；见 CSS 里的 white-space:nowrap + min-width:6ch。
+    function isNumericField(f) {
+      return f && (f.type === 'number' || f.type === 'formula');
+    }
+
     function buildTableRow(o, visibleFields) {
       const checked = selectedOrders.has(o.id) ? 'checked' : '';
       let html = '<tr data-id="' + escapeAttr(o.id) + '">';
@@ -5386,8 +5401,10 @@
         const onclick = (f.type === 'formula')
           ? 'onclick="showFormulaDetail(\'' + escapeJs(o.id) + '\', \'' + escapeJs(f.key) + '\')" title="点击查看计算过程"'
           : 'onclick="startInlineEdit(this, \'' + escapeJs(o.id) + '\', \'' + escapeJs(f.key) + '\')"';
-        // 内容长了就换行变高（CSS 已限宽），不会把表格撑得老宽
-        html += '<td class="clickable" ' + onclick + '>' + cellHtml + '</td>';
+        // 内容长了就换行变高（CSS 已限宽），不会把表格撑得老宽；
+        // 但数字类例外：加 cell-num 让这一列保持一行，不把 48.75 拆成 "48.7"+"5"
+        const cls = 'clickable' + (isNumericField(f) ? ' cell-num' : '');
+        html += '<td class="' + cls + '" ' + onclick + '>' + cellHtml + '</td>';
       });
       html += '<td class="actions-cell">' +
         '<button class="btn btn-secondary btn-sm" onclick="editOrder(\'' + escapeJs(o.id) + '\')">编辑</button>' +
@@ -9036,7 +9053,7 @@
     bootstrap();
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.09.17-3'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.09.17-4'; // 每次修改系统时改一下版本号即可触发更新
     // 规则：YYYY.MM.DD-N，日期必须是【当天真实日期】，N 是当天第几次修改。
     // 历史教训：曾经照着前一天的日期往下累加，导致版本号日期失真（铁律 1 说的就是这个坑）。
 
@@ -9045,6 +9062,15 @@
     // 说明：2026.09.13-6 ~ -21 是按当时（9/13 起）连续的改动号，日期沿用当时发布的号；
     //       从 2026.09.15-1 起严格按"当天真实日期-当天序号"执行。
     const APP_CHANGELOG = [
+      {
+        ver: '2026.09.17-4', date: '2026-09-17',
+        items: [
+          ['🐛 修复', [
+            '价格、利润这类数字不再被断成两行（例如 48.75 曾被拆成「48.7」和「5」，看着像两个数）',
+            '现在数字列会自动保证足够宽度，装不下就整列变宽，绝不在数字中间断开'
+          ]]
+        ]
+      },
       {
         ver: '2026.09.17-3', date: '2026-09-17',
         items: [
