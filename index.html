@@ -292,12 +292,9 @@
   .formula-hint { font-size: 12px; color: #888; margin-top: 4px; }
 
   /* ===== 批量录入 ===== */
-  /* 弹窗必须有【确定高度】而不是只有 max-height：
-     否则里面的「预览滚动区」量不到自己的高度，虚拟滚动就会算错行号 ——
-     表现就是"滚动条在动、内容不刷新"。 */
-  .bpm-modal { max-width: 980px; height: 92vh; max-height: 92vh; }
-  .bpm-modal .modal-body { display: flex; flex-direction: column; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-  .bpm-modal .modal-body > .bpm-sec:last-child { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+  /* 教训：给弹窗写死 height:92vh + 让最后一段 flex:1 撑满 —— 在手机上会把
+     内容挤出可视区（预览区块被压到看不见）。已经改回只用 max-height。 */
+  .bpm-modal { max-width: 980px; }
   .bpm-sec { margin-bottom: 14px; }
   .bpm-sec-title { font-size: 13px; font-weight: 600; color: #333; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .bpm-sec-title .hint { font-weight: normal; font-size: 12px; color: #999; }
@@ -348,12 +345,11 @@
     .bpm-cell.bpm-c-no { flex: 0 0 26px; font-size: 11px; }
     .bpm-cell.bpm-c-status { display: none; }   /* 手机上状态默认都一样，先让位给内容 */
     .bpm-thead .bpm-cell.bpm-c-status { display: none; }
-    .bpm-modal { height: 96vh; max-height: 96vh; border-radius: 10px; }
+    .bpm-modal { max-height: 94vh; }
     .bpm-modal .modal-hdr { padding: 10px 12px; }
     .bpm-modal .modal-body { padding: 10px 12px; }
     .bpm-modal .modal-ftr { padding: 8px 12px; flex-wrap: wrap; gap: 6px; }
     .bpm-textarea { min-height: 96px; }
-    .bpm-scroll { max-height: 38vh; }
     .bpm-sec { margin-bottom: 10px; }
   }
   .bpm-scroll { max-height: 320px; min-height: 150px; overflow-y: auto; overflow-x: hidden; position: relative; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
@@ -418,7 +414,7 @@
   </div>
 </div>
 
-<!-- ============ 批量录入 ============ -->
+<!-- ============ 批量录入（故意做得极简：粘贴 → 选方案 → 生成） ============ -->
 <div class="modal-mask" id="batchEntryModal">
   <div class="modal bpm-modal">
     <div class="modal-hdr">
@@ -427,57 +423,31 @@
     </div>
     <div class="modal-body">
 
-      <!-- ① 粘贴区 -->
-      <div class="bpm-sec">
-        <div class="bpm-sec-title">① 把订单文字粘贴到这里 <span class="hint">一行一条订单；直接复制微信里的文字即可</span></div>
-        <textarea class="bpm-textarea" id="bpmInput" placeholder="例如：&#10;裸色04 李宇英&#10;彩62+68 赵&#10;裸色03×2 王五" oninput="onBpmInput()"></textarea>
-        <div class="bpm-bar">
-          <button class="btn btn-secondary btn-sm" onclick="bpmParseNow()">🔍 解析</button>
-          <button class="btn btn-secondary btn-sm" onclick="bpmClearInput()">清空</button>
-          <span class="bpm-map-hint" id="bpmInputHint"></span>
-        </div>
-        <div class="bpm-progress" id="bpmProgress" style="display:none;">
-          <div class="bar-wrap"><div class="bar" id="bpmProgressBar"></div></div>
-          <div class="txt" id="bpmProgressText">0%</div>
-        </div>
+      <!-- ① 粘贴文本（界面上唯一需要你填的东西） -->
+      <textarea class="bpm-textarea" id="bpmInput" placeholder="把订单文字粘贴到这里，一行一条订单&#10;&#10;例如：&#10;裸色04 李宇英&#10;彩62+68 赵&#10;裸色03×2 王五" oninput="onBpmInput()"></textarea>
+      <div class="bpm-bar" style="margin-top:6px;">
+        <span class="bpm-map-hint" id="bpmInputHint"></span>
+        <button class="btn btn-secondary btn-sm" style="margin-left:auto;" onclick="bpmClearInput()">清空</button>
       </div>
 
-      <!-- ② 配置方案 -->
-      <div class="bpm-sec">
-        <div class="bpm-sec-title">② 配置方案 <span class="hint">存下来下次直接用；默认用上次的方案</span></div>
-        <div class="bpm-bar">
-          <select id="bpmSchemeSelect" onchange="bpmSwitchScheme(this.value)"></select>
-          <button class="btn btn-secondary btn-sm" onclick="bpmSaveSchemeAs()">另存为…</button>
-          <button class="btn btn-secondary btn-sm" onclick="bpmRenameScheme()">重命名</button>
-          <button class="btn btn-secondary btn-sm" onclick="bpmDeleteScheme()">删除</button>
-        </div>
+      <!-- ② 方案（一行搞定：选一个 + 去设置） -->
+      <div class="bpm-bar" style="margin-top:12px;">
+        <label style="font-size:14px;color:#555;flex:none;">使用方案：</label>
+        <select id="bpmSchemeSelect" style="flex:1;min-width:120px;" onchange="bpmSwitchScheme(this.value)"></select>
+        <button class="btn btn-secondary btn-sm" onclick="openBpmSchemeSettings()">⚙️ 设置</button>
+      </div>
+      <div class="bpm-map-hint" id="bpmSchemeSummary" style="margin:4px 0 8px;"></div>
+      <button class="btn btn-primary" id="bpmGenBtn" style="width:100%;padding:11px;font-size:15px;" onclick="bpmGenClick()">开始生成</button>
+
+      <div class="bpm-progress" id="bpmProgress" style="display:none;">
+        <div class="bar-wrap"><div class="bar" id="bpmProgressBar"></div></div>
+        <div class="txt" id="bpmProgressText">0%</div>
       </div>
 
-      <!-- ③ 字段映射 -->
-      <div class="bpm-sec">
-        <div class="bpm-sec-title">③ 每个信息块放到哪个字段 <span class="hint">第几块由空格位置决定</span></div>
-        <div id="bpmMapping"></div>
-        <div class="bpm-map-hint">
-          「产品名 + 规格」的拆法：先用 <b>+</b> 拆成多个规格；<b>×</b>（或 *）表示数量，只作用于它左边紧挨的那一个；
-          没有 <b>×</b> 时，从右往左取末尾连续数字作为规格；<b>叉叉2代</b> 这种末尾是汉字的整体当产品名；
-          <b>叉叉3.04</b> 这种产品名末尾是数字的，用小数点隔开规格。
-        </div>
-      </div>
-
-      <!-- ④ 本批字段默认值 -->
-      <div class="bpm-sec">
-        <div class="bpm-sec-title">④ 本批共用的默认值 <span class="hint">原文里没有的字段，由这里统一填</span></div>
-        <div class="bpm-bar" id="bpmBatchDefaults"></div>
-      </div>
-
-      <!-- ⑤ 预览 -->
-      <div class="bpm-sec">
-        <div class="bpm-sec-title">⑤ 预览 <span class="hint">点格子可直接改；带问题的行已默认排除</span>
-          <button class="btn btn-secondary btn-sm" style="margin-left:auto;" onclick="bpmToggleAll()">全选 / 全不选</button>
-          <button class="btn btn-secondary btn-sm" onclick="bpmSelectOnlyOk()">只选没问题的</button>
-        </div>
+      <!-- ③ 预览 -->
+      <div class="bpm-sec" id="bpmPreviewSec" style="margin-top:12px;">
         <div id="bpmSummary"></div>
-        <div class="bpm-table-wrap">
+        <div class="bpm-table-wrap" id="bpmTableWrap" style="display:none;">
           <div class="bpm-thead">
             <div class="bpm-cell bpm-c-chk"><input type="checkbox" id="bpmChkAll" onchange="bpmToggleAllFromHeader(this.checked)"></div>
             <div class="bpm-cell bpm-c-no">行号</div>
@@ -492,6 +462,10 @@
             <div id="bpmRowSpacerBot" style="height:0;"></div>
           </div>
         </div>
+        <div class="bpm-bar" id="bpmPreviewTools" style="display:none;">
+          <button class="btn btn-secondary btn-sm" onclick="bpmToggleAll()">全选 / 全不选</button>
+          <button class="btn btn-secondary btn-sm" onclick="bpmSelectOnlyOk()">只选没问题的</button>
+        </div>
       </div>
 
     </div>
@@ -499,6 +473,47 @@
       <span id="bpmFootHint" style="margin-right:auto;font-size:13px;color:#888;"></span>
       <button class="btn btn-secondary" onclick="closeBatchEntry()">取消</button>
       <button class="btn btn-primary" id="bpmConfirmBtn" onclick="bpmConfirmImport()" disabled>确认导入</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 批量录入：方案设置（设置项都收在这里，不摊在主界面上） ============ -->
+<div class="modal-mask" id="bpmSchemeModal" style="z-index:1100;">
+  <div class="modal bpm-modal">
+    <div class="modal-hdr">
+      <h3>⚙️ 方案设置</h3>
+      <button class="close-x" onclick="closeBpmSchemeSettings()">×</button>
+    </div>
+    <div class="modal-body">
+
+      <div class="bpm-sec">
+        <div class="bpm-sec-title">方案名称</div>
+        <div class="bpm-bar">
+          <input id="bpmSchemeNameInput" style="flex:1;min-width:140px;" placeholder="给这个方案起个名字，如「微信日常」">
+          <button class="btn btn-secondary btn-sm" onclick="bpmApplySchemeName()">改名</button>
+          <button class="btn btn-secondary btn-sm" onclick="bpmSaveSchemeAs()">另存为新方案</button>
+          <button class="btn btn-secondary btn-sm" onclick="bpmDeleteScheme()">删除此方案</button>
+        </div>
+      </div>
+
+      <div class="bpm-sec">
+        <div class="bpm-sec-title">每个信息块放到哪个字段 <span class="hint">第几块由空格位置决定</span></div>
+        <div id="bpmMapping"></div>
+        <div class="bpm-map-hint">
+          「产品名 + 规格」的拆法：先用 <b>+</b> 拆成多个规格；<b>×</b>（或 *）表示数量，只作用于它左边紧挨的那一个；
+          没有 <b>×</b> 时，从右往左取末尾连续数字作为规格；<b>叉叉2代</b> 这种末尾是汉字的整体当产品名；
+          <b>叉叉3.04</b> 这种产品名末尾是数字的，用小数点隔开规格。
+        </div>
+      </div>
+
+      <div class="bpm-sec">
+        <div class="bpm-sec-title">本批共用的默认值 <span class="hint">原文里没有的字段，由这里统一填</span></div>
+        <div class="bpm-bar" id="bpmBatchDefaults"></div>
+      </div>
+
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-primary" onclick="closeBpmSchemeSettings()">完成</button>
     </div>
   </div>
 </div>
@@ -512,7 +527,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.17-2</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.17-3</button>
      <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
      <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
      <button class="btn btn-secondary btn-sm" id="changelogBtn" onclick="openChangelog()">📢 公告</button>
@@ -3648,6 +3663,43 @@
       return f ? f.key : '';
     }
 
+    // ---------- 方案设置弹窗（设置项都收在这里，主界面保持极简） ----------
+    function openBpmSchemeSettings() {
+      renderBpmMapping();
+      renderBpmBatchDefaults();
+      const nameInput = document.getElementById('bpmSchemeNameInput');
+      const sc = bpmCurrentScheme();
+      if (nameInput && sc) nameInput.value = sc.name;
+      document.getElementById('bpmSchemeModal').classList.add('show');
+    }
+    function closeBpmSchemeSettings() {
+      bpmFlushCurrentConfig();          // 关设置时把改动写回当前方案
+      renderBpmSchemeSelect();
+      document.getElementById('bpmSchemeModal').classList.remove('show');
+      refreshBpmPreview();              // 改了设置就按新设置重算预览
+    }
+    function bpmApplySchemeName() {
+      const sc = bpmCurrentScheme();
+      const nameInput = document.getElementById('bpmSchemeNameInput');
+      if (!sc || !nameInput) return;
+      const name = (nameInput.value || '').trim();
+      if (!name) { showToast('⚠️ 请先输入方案名字'); return; }
+      if (_bpmSchemes.some(function (s) { return s !== sc && s.name === name; })) {
+        showToast('⚠️ 已有同名方案，请换个名字'); return;
+      }
+      sc.name = name;
+      saveBatchSchemes();
+      renderBpmSchemeSelect();
+      showToast('✅ 已改名：' + name);
+    }
+    // "开始生成"：手机上少一步操作 —— 直接解析并显示预览
+    function bpmGenClick() {
+      const input = document.getElementById('bpmInput');
+      const text = input ? input.value : '';
+      if (!text || text.trim() === '') { showToast('⚠️ 请先把订单文字粘贴到上面的框里'); return; }
+      bpmParseNow();
+    }
+
     // ---------- 打开 / 关闭 ----------
     function openBatchEntry() {
       loadBatchSchemes();
@@ -3657,12 +3709,13 @@
       if (input) input.value = '';
       _bpmParsed = null; _bpmRows = []; _bpmWinStart = 0;
       renderBpmSchemeSelect();
-      renderBpmMapping();
-      renderBpmBatchDefaults();
+      renderBpmSchemeSummary();
       renderBpmSummary();
       renderBpmRows();
       updateBpmInputHint();
       bindBpmScroll();
+      const tw = document.getElementById('bpmTableWrap'); if (tw) tw.style.display = 'none';
+      const pt = document.getElementById('bpmPreviewTools'); if (pt) pt.style.display = 'none';
       document.getElementById('bpmProgress').style.display = 'none';
       document.getElementById('batchEntryModal').classList.add('show');
       // 显示之后再量高度（显示前 clientHeight 是 0，会让窗口算错）
@@ -3826,6 +3879,20 @@
         return '<option value="' + escapeAttr(s.id) + '"' + (s.id === _bpmCurSchemeId ? ' selected' : '') + '>' + escapeHtml(s.name) + '</option>';
       }).join('');
     }
+    // 一句话摘要，显示在主界面方案旁边，让你不用打开设置也知道当前怎么拆
+    function bpmConfigSummary() {
+      if (!_bpmConfig || !Array.isArray(_bpmConfig.blocks)) return '';
+      const opts = bpmFieldOptions();
+      return _bpmConfig.blocks.map(function (bc, i) {
+        const f = opts.find(function (x) { return x.key === bc.field; });
+        const isIgnore = bc.method === BPM_IGNORE;
+        return '第' + (i + 1) + '块→' + (isIgnore ? '忽略' : (f ? f.label : '—'));
+      }).join('　');
+    }
+    function renderBpmSchemeSummary() {
+      const el = document.getElementById('bpmSchemeSummary');
+      if (el) el.textContent = bpmConfigSummary();
+    }
     function bpmSwitchScheme(id) {
       const sc = _bpmSchemes.find(function (s) { return s.id === id; });
       if (!sc) return;
@@ -3836,8 +3903,9 @@
       _bpmConfig = JSON.parse(JSON.stringify(sc.config));
       if (!_bpmConfig.defaults) _bpmConfig.defaults = {};
       renderBpmSchemeSelect();
-      renderBpmMapping();
-      renderBpmBatchDefaults();
+      renderBpmSchemeSummary();
+      const nameInput = document.getElementById('bpmSchemeNameInput');
+      if (nameInput) nameInput.value = sc.name;
       refreshBpmPreview();
     }
     function bpmSaveSchemeAs() {
@@ -4013,13 +4081,20 @@
     function renderBpmSummary() {
       const box = document.getElementById('bpmSummary');
       const foot = document.getElementById('bpmFootHint');
+      const tableWrap = document.getElementById('bpmTableWrap');
+      const tools = document.getElementById('bpmPreviewTools');
       if (!box) return;
       if (!_bpmParsed) {
-        box.innerHTML = '<div class="bpm-warn info">粘贴文字后点「🔍 解析」，这里会显示预览结果。<b>不会有任何数据被写入，直到你点「确认导入」。</b></div>';
+        // 还没生成：主界面保持干净，只留一句提示
+        box.innerHTML = '<div class="bpm-warn info">粘贴订单文字 → 点「开始生成」，这里会出现预览。<b>在你点「确认导入」之前，不会有任何数据被写入。</b></div>';
+        if (tableWrap) tableWrap.style.display = 'none';
+        if (tools) tools.style.display = 'none';
         if (foot) foot.textContent = '';
         updateBpmConfirmState();
         return;
       }
+      if (tableWrap) tableWrap.style.display = '';
+      if (tools) tools.style.display = '';
       const st = _bpmParsed.stats;
       const errN = _bpmRows.filter(function (r) { return bpmRowLevel(r) === 'error'; }).length;
       const warnN = _bpmRows.filter(function (r) { return bpmRowLevel(r) === 'warn'; }).length;
@@ -8961,7 +9036,7 @@
     bootstrap();
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.09.17-2'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.09.17-3'; // 每次修改系统时改一下版本号即可触发更新
     // 规则：YYYY.MM.DD-N，日期必须是【当天真实日期】，N 是当天第几次修改。
     // 历史教训：曾经照着前一天的日期往下累加，导致版本号日期失真（铁律 1 说的就是这个坑）。
 
@@ -8970,6 +9045,19 @@
     // 说明：2026.09.13-6 ~ -21 是按当时（9/13 起）连续的改动号，日期沿用当时发布的号；
     //       从 2026.09.15-1 起严格按"当天真实日期-当天序号"执行。
     const APP_CHANGELOG = [
+      {
+        ver: '2026.09.17-3', date: '2026-09-17',
+        items: [
+          ['🐛 修复', [
+            '批量录入在手机上看不到预览（上一版给弹窗写死了高度、又让内容区强制撑满，把预览挤出了可视区）'
+          ]],
+          ['⚡ 优化', [
+            '批量录入界面大幅简化：现在只有「粘贴文字的框」+「使用哪个方案」+「开始生成」三步',
+            '字段怎么拆、放进哪个字段、默认状态等设置，全部收进「⚙️ 设置」里，不再摊在屏幕上',
+            '选中方案后，旁边会用一句话说明它怎么拆（如：第1块→产品内容　第2块→收件人）'
+          ]]
+        ]
+      },
       {
         ver: '2026.09.17-2', date: '2026-09-17',
         items: [
