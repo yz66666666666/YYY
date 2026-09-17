@@ -12,6 +12,59 @@
   header { background: #fff; padding: 12px 16px; border-bottom: 1px solid #e8e8e8; position: sticky; top: 0; z-index: 100; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
   header h1 { margin: 0; font-size: 18px; color: #1a73e8; }
   .header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  /* ===== 拖拽排序模式 ===== */
+  /* 进入方式：点右上角固定的「↕ 排序」按钮（它自己不可拖，保证永远找得到入口） */
+  #dragModeBtn { flex: none; }
+  body.drag-mode .drag-area {
+    outline: 2px dashed #a8c7ff;
+    outline-offset: 3px;
+    border-radius: 10px;
+    padding: 4px;
+    background: rgba(238, 244, 255, 0.5);
+  }
+  body.drag-mode .drag-item {
+    position: relative;
+    cursor: grab;
+    touch-action: none;          /* 关键：手机上禁止把拖动当成页面滚动 */
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  body.drag-mode .drag-item::before {
+    content: '⠿';
+    position: absolute;
+    top: -7px;
+    left: -7px;
+    font-size: 12px;
+    line-height: 1;
+    color: #fff;
+    background: #1a73e8;
+    border-radius: 50%;
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 3;
+    pointer-events: none;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+  }
+  body.drag-mode .drag-item.dragging {
+    opacity: 0.85;
+    transform: scale(1.06);
+    box-shadow: 0 6px 18px rgba(26,115,232,0.35);
+    z-index: 10;
+    cursor: grabbing;
+  }
+  /* 拖拽模式下让按钮"吃不到"点击：指针事件直接落到外层 .drag-item 上，
+     这样既不会误触功能，拖动时也不会被按钮抢走手指。 */
+  body.drag-mode .header-actions .btn,
+  body.drag-mode .stat-card { pointer-events: none; cursor: grab; }
+  #dragResetChip { position: fixed; right: 12px; bottom: 12px; z-index: 1200; display: none; }
+  body.drag-mode #dragResetChip { display: block; }
+  /* 拖动中的元素要浮在最上面，否则可能被别的元素盖住导致指针事件断掉 */
+  body.drag-mode .drag-item { z-index: 5; }
+  body.drag-mode .drag-item.dragging { pointer-events: none; }
   .btn { border: none; padding: 8px 14px; border-radius: 6px; font-size: 14px; cursor: pointer; transition: background 0.2s; }
   .btn-primary { background: #1a73e8; color: #fff; }
   .btn-primary:hover { background: #1765cc; }
@@ -535,19 +588,14 @@
     </div>
     <h1>📋 订单管理系统</h1>
   </div>
-  <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.17-5</button>
-     <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
-     <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
-     <button class="btn btn-secondary btn-sm" id="changelogBtn" onclick="openChangelog()">📢 公告</button>
-    <button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>
-    <button class="btn btn-secondary" onclick="openBatchEntry()">📥 批量录入</button>
-    <button class="btn btn-secondary" onclick="openStatsConfig()">📊 统计配置</button>
-    <button class="btn btn-secondary" onclick="document.getElementById('syncModal').classList.add('show')">☁️ 同步</button>
-  </div>
+  <div class="header-actions" id="headerActions"><!-- 按钮由 renderHeaderButtons() 按你排的顺序生成 --></div>
+  <button id="dragModeBtn" class="btn btn-secondary btn-sm" onclick="toggleDragMode()" title="调整按钮和统计卡片的顺序">↕ 排序</button>
 </header>
 
 <div class="stats-bar" id="statsBar"></div>
+
+<!-- 拖拽模式下出现的"恢复默认顺序" -->
+<button id="dragResetChip" class="btn btn-secondary btn-sm" onclick="resetDragOrder()">↺ 恢复默认顺序</button>
 
 <div class="toolbar">
   <input id="searchInput" placeholder="🔍 搜索订单号 / 内容 / 客户 / 地址..." oninput="onSearchInput()">
@@ -2824,7 +2872,7 @@
     function statsAccToValuesOf(accs) {
       const out = [];
       statsConfig.forEach((s, i) => {
-        out.push({ label: s.label, val: String(statResult(accs[i], s)), icon: s.icon || '📊', color: s.color || 'blue' });
+        out.push({ id: s.id, label: s.label, val: String(statResult(accs[i], s)), icon: s.icon || '📊', color: s.color || 'blue' });
       });
       return out;
     }
@@ -2832,7 +2880,8 @@
     function statsHtml(vals) {
       let html = '';
       vals.forEach(v => {
-        html += '<div class="stat-card">' +
+        // data-stat-id 供拖拽排序识别是哪一项（拖完据此重排 statsConfig）
+        html += '<div class="stat-card"' + (v.id ? ' data-statid="' + escapeAttr(v.id) + '"' : '') + '>' +
           '<div class="stat-icon ' + v.color + '">' + v.icon + '</div>' +
           '<div class="stat-info"><div class="stat-val">' + escapeHtml(v.val) + '</div><div class="stat-label">' + escapeHtml(v.label) + '</div></div>' +
           '</div>';
@@ -2858,7 +2907,11 @@
       // 右下角一个"统计范围"切换按钮（点它可在 跟随筛选／全部订单 之间切换）
       html += '<div class="stats-scope" onclick="toggleStatsScope()" title="点击切换统计范围">' +
               escapeHtml(statsScopeLabel()) + '</div>';
-      if (bar._lastHtml !== html) { bar.innerHTML = html; bar._lastHtml = html; }
+      if (bar._lastHtml !== html) {
+        bar.innerHTML = html;
+        bar._lastHtml = html;
+        if (dragMode) markDragItems();   // 重画后要把拖拽把手重新挂上
+      }
     }
 
     // 统计栏右上角的"重算中"小转圈
@@ -3068,7 +3121,7 @@
     function statsAccToValues() {
       const out = [];
       statsConfig.forEach((s, i) => {
-        out.push({ label: s.label, val: String(statResult(_statsAcc[i], s)), icon: s.icon || '📊', color: s.color || 'blue' });
+        out.push({ id: s.id, label: s.label, val: String(statResult(_statsAcc[i], s)), icon: s.icon || '📊', color: s.color || 'blue' });
       });
       return out;
     }
@@ -4494,6 +4547,229 @@
         }
       }, 60);
     }
+
+    // ==================== 拖拽排序（顶部按钮 + 统计卡片） ====================
+    // 用户要求：这两处都可以拖动改变相对位置；旁边放个小按钮，点一下进入拖拽模式。
+    // 设计要点：
+    //   ① 入口按钮（↕ 排序）自己【不可拖、不参与保存】，否则拖乱了就找不到入口了；
+    //   ② 拖拽期间按钮不执行功能（JS + CSS 双层挡），避免拖的时候误触；
+    //   ③ 用 Pointer Events 一套代码同时支持手机触摸和电脑鼠标；
+    //   ④ 把手必须 touch-action:none，否则手机上会把"拖动"当成"页面滚动"。
+    let dragMode = false;
+    let _dragEl = null;
+
+    // 顶部按钮：id -> 定义。以后加按钮只要往这里加一条。
+    const HEADER_BTN_DEFS = [
+      { id: 'update',     html: '<button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()"></button>' },
+      { id: 'products',   html: '<button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>' },
+      { id: 'history',    html: '<button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>' },
+      { id: 'changelog',  html: '<button class="btn btn-secondary btn-sm" id="changelogBtn" onclick="openChangelog()"><span id="changelogBtnLabel">📢 公告</span></button>' },
+      { id: 'add',        html: '<button class="btn btn-primary" onclick="openAddModal()">+ 新增订单</button>' },
+      { id: 'batch',      html: '<button class="btn btn-secondary" onclick="openBatchEntry()">📥 批量录入</button>' },
+      { id: 'statsCfg',   html: '<button class="btn btn-secondary" onclick="openStatsConfig()">📊 统计配置</button>' },
+      { id: 'sync',       html: '<button class="btn btn-secondary" onclick="document.getElementById(\'syncModal\').classList.add(\'show\')">☁️ 同步</button>' }
+    ];
+    const HEADER_ORDER_KEY = 'om_headerBtnOrder';
+    const STATS_ORDER_KEY = 'om_statsCardOrder';
+
+    function loadOrderSetting(key) {
+      try {
+        const raw = getSetting(key, '');
+        if (!raw) return [];
+        const arr = JSON.parse(raw);
+        return Array.isArray(arr) ? arr.filter(function (x) { return typeof x === 'string'; }) : [];
+      } catch (e) { return []; }
+    }
+    function saveOrderSetting(key, arr) {
+      try { setSetting(key, JSON.stringify(arr)); } catch (e) {}
+    }
+    // 按保存的顺序排；新增的条目（用户没排过的）追加到末尾
+    function orderByIds(allIds, saved) {
+      const out = [];
+      saved.forEach(function (id) { if (allIds.indexOf(id) >= 0 && out.indexOf(id) < 0) out.push(id); });
+      allIds.forEach(function (id) { if (out.indexOf(id) < 0) out.push(id); });
+      return out;
+    }
+
+    function renderHeaderButtons() {
+      const box = document.getElementById('headerActions');
+      if (!box) return;
+      const defs = {};
+      HEADER_BTN_DEFS.forEach(function (d) { defs[d.id] = d; });
+      const allIds = HEADER_BTN_DEFS.map(function (d) { return d.id; });
+      const ordered = orderByIds(allIds, loadOrderSetting(HEADER_ORDER_KEY));
+      let html = ordered.map(function (id) {
+        const d = defs[id];
+        const isAdd = (id === 'add');
+        return '<span class="drag-item" data-dragid="' + id + '"' +
+               (isAdd ? ' data-dragdefault="' + id + '"' : '') + '>' + d.html + '</span>';
+      }).join('');
+      box.innerHTML = html;
+      // 版本号按钮的文字要跟着版本走（它现在由这里生成）
+      const vb = box.querySelector('#checkUpdateBtn');
+      if (vb) vb.textContent = '🔄 v' + APP_VERSION;
+      // 公告未读小红点（原来挂在静态按钮上，现在要重新挂）
+      updateChangelogBadge();
+    }
+
+    function toggleDragMode() {
+      dragMode = !dragMode;
+      document.body.classList.toggle('drag-mode', dragMode);
+      const btn = document.getElementById('dragModeBtn');
+      if (btn) {
+        btn.textContent = dragMode ? '✓ 完成' : '↕ 排序';
+        btn.className = 'btn btn-sm ' + (dragMode ? 'btn-primary' : 'btn-secondary');
+      }
+      const zones = [document.getElementById('headerActions'), document.getElementById('statsBar')];
+      zones.forEach(function (z) { if (z) z.classList.toggle('drag-area', dragMode); });
+      if (dragMode) {
+        markDragItems();
+        showToast('↕ 排序模式：按住 ⠿ 拖动即可换位置');
+      } else {
+        commitHeaderOrder();
+        commitStatsOrder();
+        markDragItems();
+        showToast('✅ 顺序已保存');
+      }
+    }
+
+    function markDragItems() {
+      const hb = document.getElementById('headerActions');
+      if (hb) Array.prototype.forEach.call(hb.children, function (c) { c.classList.add('drag-item'); });
+      const sb = document.getElementById('statsBar');
+      if (sb) Array.prototype.forEach.call(sb.querySelectorAll('.stat-card'), function (c) { c.classList.add('drag-item'); });
+    }
+
+    // 拖拽期间挡掉按钮本身的点击（不执行功能，只换位置）
+    document.addEventListener('click', function (e) {
+      if (!dragMode) return;
+      const t = e.target;
+      if (!t) return;
+      if (t.closest && (t.closest('#headerActions') || t.closest('#statsBar'))) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }, true);
+
+    function commitHeaderOrder() {
+      const box = document.getElementById('headerActions');
+      if (!box) return;
+      const ids = Array.prototype.map.call(box.children, function (c) { return c.dataset ? c.dataset.dragid : ''; })
+        .filter(function (x) { return x; });
+      if (ids.length) saveOrderSetting(HEADER_ORDER_KEY, ids);
+    }
+    function commitStatsOrder() {
+      const bar = document.getElementById('statsBar');
+      if (!bar || !statsConfig.length) return;
+      const ids = Array.prototype.map.call(bar.querySelectorAll('.stat-card'), function (c) { return c.dataset ? c.dataset.statid : ''; })
+        .filter(function (x) { return x; });
+      if (!ids.length) return;
+      // 按 DOM 顺序重排 statsConfig（累加器要跟着重排，否则数字会对错项）
+      const old = statsConfig.slice();
+      const next = [];
+      ids.forEach(function (id) {
+        const hit = old.find(function (s) { return s.id === id; });
+        if (hit && next.indexOf(hit) < 0) next.push(hit);
+      });
+      old.forEach(function (s) { if (next.indexOf(s) < 0) next.push(s); });
+      const changed = next.some(function (s, i) { return s !== old[i]; });
+      if (!changed) return;
+      statsConfig = next;
+      saveOrderSetting(STATS_ORDER_KEY, next.map(function (s) { return s.id; }));
+      // 顺序变了 → 累加器与显示值数组都要按新顺序重排，最后整体重算一次（顺序变化极少发生）
+      markStatsDirty();
+      saveData('调整统计卡片顺序');
+      paintStats();
+    }
+
+    function resetDragOrder() {
+      askConfirm({
+        title: '恢复默认顺序',
+        message: '把顶部按钮和统计卡片都恢复成默认排列？',
+        okText: '恢复默认',
+        onOk: function () {
+          try { localStorage.removeItem(HEADER_ORDER_KEY); } catch (e) {}
+          try { localStorage.removeItem(STATS_ORDER_KEY); } catch (e) {}
+          renderHeaderButtons();
+          // 统计卡片：按统计配置自己的顺序重排
+          const old = statsConfig.slice();
+          const defIds = loadOrderSetting(STATS_ORDER_KEY);
+          statsConfig = old;   // 配置本身顺序就是默认顺序
+          markStatsDirty();
+          saveData('恢复默认顺序');
+          if (dragMode) markDragItems();
+          paintStats();
+          showToast('↺ 已恢复默认顺序');
+        }
+      });
+    }
+
+    // ---------- 通用拖拽（Pointer Events：手机 + 电脑同一套） ----------
+    function startDrag(e, el, container, axis) {
+      if (!dragMode || !el || !container) return;
+      _dragEl = el;
+      el.classList.add('dragging');
+      try { if (el.setPointerCapture && e.pointerId !== undefined) el.setPointerCapture(e.pointerId); } catch (err) {}
+
+      const move = function (ev) {
+        if (_dragEl !== el) return;
+        const x = ev.clientX, y = ev.clientY;
+        // 找出指针落在哪个兄弟元素上，把它当作参照物
+        const items = Array.prototype.slice.call(container.children).filter(function (c) { return c !== el; });
+        let ref = null;
+        for (let i = 0; i < items.length; i++) {
+          const r = items[i].getBoundingClientRect();
+          if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) { ref = items[i]; break; }
+        }
+        if (!ref) {
+          // 没命中就直接比中点，找最近的一个（避免拖到空隙里没反应）
+          for (let i = 0; i < items.length; i++) {
+            const r = items[i].getBoundingClientRect();
+            const mid = axis === 'x' ? (r.left + r.right) / 2 : (r.top + r.bottom) / 2;
+            const pos = axis === 'x' ? x : y;
+            const before = axis === 'x' ? (pos < mid) : (pos < mid);
+            if (before) { ref = items[i]; break; }
+          }
+        }
+        if (ref && ref !== el.nextSibling) {
+          if (ref.nextSibling === el) return;   // 已经在它后面了，别来回抖
+          container.insertBefore(el, ref);
+        }
+        if (typeof ev.preventDefault === 'function') ev.preventDefault();
+      };
+      const end = function () {
+        el.classList.remove('dragging');
+        _dragEl = null;
+        el.removeEventListener('pointermove', move);
+        el.removeEventListener('pointerup', end);
+        el.removeEventListener('pointercancel', end);
+        commitHeaderOrder();
+        commitStatsOrder();
+      };
+      el.addEventListener('pointermove', move);
+      el.addEventListener('pointerup', end);
+      el.addEventListener('pointercancel', end);
+      if (typeof e.preventDefault === 'function') e.preventDefault();
+    }
+
+    // 顶部按钮排
+    document.addEventListener('pointerdown', function (e) {
+      if (!dragMode) return;
+      const box = document.getElementById('headerActions');
+      if (!box) return;
+      const item = e.target && e.target.closest ? e.target.closest('#headerActions .drag-item') : null;
+      if (!item || !box.contains(item)) return;
+      startDrag(e, item, box, 'x');
+    });
+    // 统计卡片
+    document.addEventListener('pointerdown', function (e) {
+      if (!dragMode) return;
+      const bar = document.getElementById('statsBar');
+      if (!bar) return;
+      const item = e.target && e.target.closest ? e.target.closest('.stat-card') : null;
+      if (!item || !bar.contains(item)) return;
+      startDrag(e, item, bar, 'x');
+    });
 
     // ============ 渲染表格/卡片 ============
     // ============ 渲染性能优化 ============
@@ -9032,6 +9308,7 @@
       }
 
       // ② 其余启动项（顺序与改造前一致）
+      renderHeaderButtons();  // 顶部按钮按用户排好的顺序生成
       loadDailyCounters();
       loadCollapsedDefaults();
       loadViewSettings();
@@ -9072,7 +9349,7 @@
     bootstrap();
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.09.17-5'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.09.17-6'; // 每次修改系统时改一下版本号即可触发更新
     // 规则：YYYY.MM.DD-N，日期必须是【当天真实日期】，N 是当天第几次修改。
     // 历史教训：曾经照着前一天的日期往下累加，导致版本号日期失真（铁律 1 说的就是这个坑）。
 
@@ -9081,6 +9358,19 @@
     // 说明：2026.09.13-6 ~ -21 是按当时（9/13 起）连续的改动号，日期沿用当时发布的号；
     //       从 2026.09.15-1 起严格按"当天真实日期-当天序号"执行。
     const APP_CHANGELOG = [
+      {
+        ver: '2026.09.17-6', date: '2026-09-17',
+        items: [
+          ['✨ 新增', [
+            '顶部按钮和统计卡片可以拖动换位置了：点右上角「↕ 排序」进入排序模式，按住 ⠿ 拖动，点「✓ 完成」保存',
+            '排好的顺序会记住，换手机、云同步后也在；拖乱了可点右下角「↺ 恢复默认顺序」一键还原',
+            '排序模式下按钮不会被误按（只换位置，不执行功能）'
+          ]],
+          ['🐛 修复', [
+            '公告按钮的未读数字在改动后可能显示异常（已改为只更新按钮内部的文字，不动按钮本身）'
+          ]]
+        ]
+      },
       {
         ver: '2026.09.17-5', date: '2026-09-17',
         items: [
@@ -9238,10 +9528,13 @@
       return idx < 0 ? APP_CHANGELOG.length : idx;  // 排在前面的都是更新
     }
     function updateChangelogBadge() {
-      const btn = document.getElementById('changelogBtn');
-      if (!btn) return;
+      // 【重要】只更新按钮【内部那个 span】，绝不要写 btn.innerHTML = ...
+      // 原因：公告按钮现在由 renderHeaderButtons() 动态生成，
+      // 直接重写按钮的 innerHTML 会把 <button> 本身从 DOM 里抹掉（实测会把按钮结构越套越坏）。
       const n = changelogUnreadCount();
-      btn.innerHTML = '📢 公告' + (n > 0 ? '<span class="cl-badge">' + n + '</span>' : '');
+      const label = document.getElementById('changelogBtnLabel');
+      if (!label) return;
+      label.innerHTML = '📢 公告' + (n > 0 ? '<span class="cl-badge">' + n + '</span>' : '');
     }
     function openChangelog() {
       const box = document.getElementById('changelogList');
