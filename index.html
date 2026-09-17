@@ -458,7 +458,7 @@
         <div id="bpmSummary"></div>
         <div class="bpm-table-wrap" id="bpmTableWrap" style="display:none;">
           <div class="bpm-thead">
-            <div class="bpm-cell bpm-c-chk"><input type="checkbox" id="bpmChkAll" onchange="bpmToggleAllFromHeader(this.checked)"></div>
+            <div class="bpm-cell bpm-c-chk"><input type="checkbox" id="bpmChkAll" onchange="bpmSetAllChecked(this.checked)"></div>
             <div class="bpm-cell bpm-c-no">行号</div>
             <div class="bpm-cell bpm-c-prod">产品内容</div>
             <div class="bpm-cell bpm-c-cust">收件人</div>
@@ -536,7 +536,7 @@
     <h1>📋 订单管理系统</h1>
   </div>
   <div class="header-actions">
-    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.17-4</button>
+    <button id="checkUpdateBtn" class="btn btn-secondary btn-sm" onclick="checkForUpdates()">🔄 v2026.09.17-5</button>
      <button class="btn btn-secondary btn-sm" onclick="openProductManager()">📦 商品</button>
      <button class="btn btn-secondary btn-sm" onclick="openHistoryBackup()">📜 历史备份</button>
      <button class="btn btn-secondary btn-sm" id="changelogBtn" onclick="openChangelog()">📢 公告</button>
@@ -4158,14 +4158,18 @@
         return o ? o.label : statusVal;
       })();
       const cls = 'bpm-row' + (level === 'error' ? ' bpm-error' : (level === 'warn' ? ' bpm-warn' : '')) + (row.checked ? '' : ' bpm-skip');
+      // 注意：输入框【只绑 oninput，不绑 onchange】。
+      // 移动端的 change 事件触发时机很飘（键盘收起、点击别处都会触发），
+      // 一旦触发了会重算/重画，正在编辑的输入框就可能被销毁 → 键盘瞬间收起。
+      // 所以"改完这一格"的收尾处理放在别处（点勾选框、点「只选没问题的」时统一重算）。
       return '<div class="' + cls + '" data-bpm-idx="' + idx + '">' +
         '<div class="bpm-cell bpm-c-chk"><input type="checkbox" ' + (row.checked ? 'checked' : '') +
           ' onchange="onBpmRowCheck(' + idx + ', this.checked)"></div>' +
         '<div class="bpm-cell bpm-c-no">' + row.lineNo + '</div>' +
         '<div class="bpm-cell bpm-c-prod"><input type="text" value="' + escapeAttr(prodVal) +
-          '" oninput="onBpmRowEdit(' + idx + ', \'' + escapeJs(prodKey) + '\', this.value)" onchange="onBpmRowEdited(' + idx + ')"></div>' +
+          '" oninput="onBpmRowEdit(' + idx + ', \'' + escapeJs(prodKey) + '\', this.value)"></div>' +
         '<div class="bpm-cell bpm-c-cust"><input type="text" value="' + escapeAttr(custVal) +
-          '" oninput="onBpmRowEdit(' + idx + ', \'' + escapeJs(custKey) + '\', this.value)" onchange="onBpmRowEdited(' + idx + ')"></div>' +
+          '" oninput="onBpmRowEdit(' + idx + ', \'' + escapeJs(custKey) + '\', this.value)"></div>' +
         '<div class="bpm-cell bpm-c-status">' + escapeHtml(statusLabel) + '</div>' +
         '<div class="bpm-cell bpm-c-note">' + escapeHtml(bpmNoteText(row)) + '</div>' +
       '</div>';
@@ -4232,23 +4236,37 @@
       const row = _bpmRows[idx];
       if (!row || !fieldKey) return;
       row.values[fieldKey] = value;
+      // 边打字边更新这一行的"问题标记"：
+      // 只改「标注原因」的文字和行底色，**绝对不重建输入框**（否则手机键盘会瞬间收起）。
+      const before = row.notes.join(',');
+      // autoCheck=true：你把缺的内容手工补上后，这一行自动勾上（少点一下）
+      recheckBpmRow(row, true);
+      if (row.notes.join(',') !== before) refreshBpmNoteCell(idx, row);
     }
+    // 就地更新某一行的标注文字与底色（不动输入框）
+    function refreshBpmNoteCell(idx, row) {
+      const el = document.querySelector('[data-bpm-idx="' + idx + '"]');
+      if (!el) return;
+      if (el.querySelector) {
+        const noteEl = el.querySelector('.bpm-c-note');
+        if (noteEl) noteEl.textContent = bpmNoteText(row);
+      }
+      if (el.classList) {
+        const lv = bpmRowLevel(row);
+        el.classList.toggle('bpm-error', lv === 'error');
+        el.classList.toggle('bpm-warn', lv === 'warn');
+        el.classList.toggle('bpm-skip', !row.checked);
+      }
+    }
+    // 保留这个入口（滚动/勾选等场景可以调用），但它同样不重建任何 DOM
     function onBpmRowEdited(idx) {
-      // 改了内容之后重新判定这一行的问题标记。
-      // 注意：**只重画这一行**，不要整表重画 —— 手机上整表重画会明显卡顿。
       const row = _bpmRows[idx];
       if (!row) return;
       recheckBpmRow(row);
-      const el = document.querySelector('[data-bpm-idx="' + idx + '"]');
-      if (el && el.parentNode) {
-        const wrap = document.createElement('div');
-        wrap.innerHTML = bpmRowHtml(row, idx);
-        const fresh = wrap.firstChild;
-        if (fresh) el.parentNode.replaceChild(fresh, el);
-      }
+      refreshBpmNoteCell(idx, row);
       renderBpmSummary();
     }
-    function recheckBpmRow(row) {
+    function recheckBpmRow(row, autoCheck) {
       const prodKey = bpmFieldForRole('product');
       const custKey = bpmFieldForRole('customer');
       const prodOk = !prodKey || String(row.values[prodKey] || '').trim() !== '';
@@ -4257,16 +4275,16 @@
       row.notes = kept;
       if (!prodOk) row.notes.push('productEmpty');
       if (!prodOk || !custOk) row.notes.push('fieldMissing');
-      // 问题解决了就自动勾上，让你少点一下
       const hasErr = row.notes.some(function (n) { return BPM_NOTES[n] && BPM_NOTES[n].level === 'error'; });
       row.excluded = hasErr;
-      if (!hasErr) row.checked = true;
+      // autoCheck=true 时，问题解决就自动勾上（用于"只选没问题的"这类整批操作）。
+      // 边打字时【不自动勾选】：否则用户正编辑着，勾选框会自己跳，容易误导入。
+      if (!hasErr && autoCheck) row.checked = true;
     }
 
-    function bpmToggleAllFromHeader(checked) {
-      const cand = _bpmRows.filter(function (r) { return r.checked !== undefined; });
-      const target = checked ? _bpmRows : [];
-      _bpmRows.forEach(function (r) { r.checked = !!checked; });
+    // 表头那个"全选"勾选框（参数名不用 checked，避免和 DOM 的 checked 混淆）
+    function bpmSetAllChecked(val) {
+      _bpmRows.forEach(function (r) { r.checked = !!val; });
       renderBpmSummary();
       renderBpmRows();
     }
@@ -4278,6 +4296,7 @@
     }
     function bpmSelectOnlyOk() {
       _bpmRows.forEach(function (r) {
+        recheckBpmRow(r, false);
         r.checked = !r.notes.some(function (n) { return BPM_NOTES[n] && BPM_NOTES[n].level === 'error'; });
       });
       renderBpmSummary();
@@ -9053,7 +9072,7 @@
     bootstrap();
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.09.17-4'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.09.17-5'; // 每次修改系统时改一下版本号即可触发更新
     // 规则：YYYY.MM.DD-N，日期必须是【当天真实日期】，N 是当天第几次修改。
     // 历史教训：曾经照着前一天的日期往下累加，导致版本号日期失真（铁律 1 说的就是这个坑）。
 
@@ -9062,6 +9081,15 @@
     // 说明：2026.09.13-6 ~ -21 是按当时（9/13 起）连续的改动号，日期沿用当时发布的号；
     //       从 2026.09.15-1 起严格按"当天真实日期-当天序号"执行。
     const APP_CHANGELOG = [
+      {
+        ver: '2026.09.17-5', date: '2026-09-17',
+        items: [
+          ['🐛 修复', [
+            '批量录入预览：点格子想改内容时，输入法弹出来一瞬间就自动关闭（改成编辑时不再重建输入框）',
+            '顺带修好：手工把缺失的内容补上后，这一行现在会自动勾选，不用再点一次'
+          ]]
+        ]
+      },
       {
         ver: '2026.09.17-4', date: '2026-09-17',
         items: [
