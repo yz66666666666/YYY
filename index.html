@@ -565,8 +565,8 @@
           <span>自动去掉行首的方块编号（如 <b>2️⃣</b> <b>①</b>）</span>
         </label>
         <div class="bpm-map-hint" style="margin:-4px 0 8px 22px;">
-          勾上：开头的方块编号会被丢掉（它的信息一般是重复的）。<br>
-          不勾：方块编号<b>原样保留</b>在内容里 —— 换用「原样照搬」这类方案时应该不勾。
+          <b>默认不勾</b>：方块编号会<b>原样保留</b>在内容里（例如「2️⃣裸色22」）。<br>
+          只有你确实想把它丢掉时，才勾上 —— 勾上后这个选择会被记住。
         </div>
         <div id="bpmMapping"></div>
         <div class="bpm-map-hint">
@@ -2281,9 +2281,9 @@
 
     // 去掉行首的编号标记：键帽表情（1️⃣，注意它由"数字+变体符+键帽符"三个字符组成）、
     // 带圈数字（①-⑳）。
-    // 【重要】删不删由"方案"决定（cfg.stripMarkers），不是无条件删：
-    //   用户要求 —— 只有他确认好的那个方案才删方块数字；
-    //   换用"原样照搬"或别的方案时，方块数字要原样保留在内容里。
+    // 【重要】删不删由"方案"决定（cfg.stripMarkers），不是无条件删，而且**默认不删**：
+    //   用户要求（2026-09-22）—— 默认原样保留方块数字；
+    //   只有用户在方案设置里【手动勾上】那个开关，才把方块数字删掉，并且这个选择要记住。
     // 注意：故意【不处理】"数字+点"（如 1. 裸色04），因为点号在业务里是
     //       "产品名末尾数字与规格的分隔符"（如 叉叉3.04），当编号会误伤。
     const BPM_MARKER_RE = /^(?:[0-9]\uFE0F?\u20E3|[\u2460-\u2473])/;
@@ -2402,7 +2402,9 @@
       const dupMap = {};
 
       // 是否删除行首编号标记，由方案配置决定（默认删，保持和以前一样顺手）
-      const stripMarkers = !(cfg && cfg.stripMarkers === false);
+      // 【默认不删】（用户 2026-09-22 明确要求：默认保留，除非手动勾上才删）。
+      // 只有方案里显式写了 stripMarkers === true 才删。
+      const stripMarkers = !!(cfg && cfg.stripMarkers === true);
 
       // 先扫一遍：这一批里"光秃秃数字开头"的行够不够多，够多才当列表编号剥掉
       let plainNumLines = 0;
@@ -3768,7 +3770,7 @@
     function syncBpmStripMarkersCheckbox() {
       const cb = document.getElementById('bpmStripMarkers');
       if (!cb || !_bpmConfig) return;
-      cb.checked = !(_bpmConfig.stripMarkers === false);
+      cb.checked = (_bpmConfig.stripMarkers === true);   // 默认不勾（默认保留编号）
     }
     function onBpmStripMarkersChange(checked) {
       if (!_bpmConfig) return;
@@ -3994,7 +3996,7 @@
         return '第' + (i + 1) + '块→' + (isIgnore ? '忽略' : (f ? f.label : '—'));
       });
       // 方块编号删不删也要一眼看见（用户明确要求"只有确定的方案才删"）
-      parts.push(_bpmConfig.stripMarkers === false ? '方块编号：保留' : '方块编号：删除');
+      parts.push(_bpmConfig.stripMarkers === true ? '方块编号：删除' : '方块编号：保留');
       return parts.join('　');
     }
     function renderBpmSchemeSummary() {
@@ -9396,7 +9398,7 @@
     bootstrap();
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.09.22-1'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.09.22-2'; // 每次修改系统时改一下版本号即可触发更新
     // 规则：YYYY.MM.DD-N，日期必须是【当天真实日期】，N 是当天第几次修改。
     // 历史教训：曾经照着前一天的日期往下累加，导致版本号日期失真（铁律 1 说的就是这个坑）。
 
@@ -9405,6 +9407,16 @@
     // 说明：2026.09.13-6 ~ -21 是按当时（9/13 起）连续的改动号，日期沿用当时发布的号；
     //       从 2026.09.15-1 起严格按"当天真实日期-当天序号"执行。
     const APP_CHANGELOG = [
+      {
+        ver: '2026.09.22-2', date: '2026-09-22',
+        items: [
+          ['⚡ 优化', [
+            '批量录入：方块编号（如 2️⃣ ①）改为【默认不删除】，原样保留在内容里',
+            '想删掉时，在「⚙️ 设置」里手动勾上「自动去掉行首的方块编号」；这个选择会被记住',
+            '方案摘要里会写明当前是「方块编号：保留」还是「方块编号：删除」'
+          ]]
+        ]
+      },
       {
         ver: '2026.09.22-1', date: '2026-09-22',
         items: [
