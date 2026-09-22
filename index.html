@@ -560,6 +560,14 @@
 
       <div class="bpm-sec">
         <div class="bpm-sec-title">每个信息块放到哪个字段 <span class="hint">第几块由空格位置决定</span></div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#333;margin-bottom:8px;cursor:pointer;">
+          <input type="checkbox" id="bpmStripMarkers" onchange="onBpmStripMarkersChange(this.checked)">
+          <span>自动去掉行首的方块编号（如 <b>2️⃣</b> <b>①</b>）</span>
+        </label>
+        <div class="bpm-map-hint" style="margin:-4px 0 8px 22px;">
+          勾上：开头的方块编号会被丢掉（它的信息一般是重复的）。<br>
+          不勾：方块编号<b>原样保留</b>在内容里 —— 换用「原样照搬」这类方案时应该不勾。
+        </div>
         <div id="bpmMapping"></div>
         <div class="bpm-map-hint">
           「产品名 + 规格」的拆法：先用 <b>+</b> 拆成多个规格；<b>×</b>（或 *）表示数量，只作用于它左边紧挨的那一个；
@@ -2273,6 +2281,9 @@
 
     // 去掉行首的编号标记：键帽表情（1️⃣，注意它由"数字+变体符+键帽符"三个字符组成）、
     // 带圈数字（①-⑳）。
+    // 【重要】删不删由"方案"决定（cfg.stripMarkers），不是无条件删：
+    //   用户要求 —— 只有他确认好的那个方案才删方块数字；
+    //   换用"原样照搬"或别的方案时，方块数字要原样保留在内容里。
     // 注意：故意【不处理】"数字+点"（如 1. 裸色04），因为点号在业务里是
     //       "产品名末尾数字与规格的分隔符"（如 叉叉3.04），当编号会误伤。
     const BPM_MARKER_RE = /^(?:[0-9]\uFE0F?\u20E3|[\u2460-\u2473])/;
@@ -2281,6 +2292,11 @@
     // 一律剥掉会把产品内容悄悄吃掉（曾把 "02 张三" 的产品内容抹成空）。
     const BPM_PLAIN_NUM_RE = /^[0-9]+\s/;
     const BPM_PLAIN_NUM_MIN_LINES = 2;
+
+    // 一行开头有没有"编号标记"（键帽表情 / 带圈数字）。不是"光秃秃数字"那种。
+    function bpmHasMarker(line) {
+      return BPM_MARKER_RE.test(String(line).replace(/^\s+/, ''));
+    }
 
     // 把一行切分成信息块。连续空格、全角空格都当作一个分隔符，不产生空块。
     function bpmSplitBlocks(line) {
@@ -2385,26 +2401,34 @@
       const blockCountFreq = {};
       const dupMap = {};
 
+      // 是否删除行首编号标记，由方案配置决定（默认删，保持和以前一样顺手）
+      const stripMarkers = !(cfg && cfg.stripMarkers === false);
+
       // 先扫一遍：这一批里"光秃秃数字开头"的行够不够多，够多才当列表编号剥掉
       let plainNumLines = 0;
-      for (let i = 0; i < rawLines.length; i++) {
-        const t = rawLines[i].replace(/^\s+/, '').replace(/\s+$/, '').replace(/\u3000/g, ' ');
-        if (t === '') continue;
-        if (!BPM_MARKER_RE.test(t) && BPM_PLAIN_NUM_RE.test(t)) plainNumLines++;
+      if (stripMarkers) {
+        for (let i = 0; i < rawLines.length; i++) {
+          const t = rawLines[i].replace(/^\s+/, '').replace(/\s+$/, '').replace(/\u3000/g, ' ');
+          if (t === '') continue;
+          if (!BPM_MARKER_RE.test(t) && BPM_PLAIN_NUM_RE.test(t)) plainNumLines++;
+        }
       }
-      const stripPlainNum = plainNumLines >= BPM_PLAIN_NUM_MIN_LINES;
+      const stripPlainNum = stripMarkers && plainNumLines >= BPM_PLAIN_NUM_MIN_LINES;
 
       for (let i = 0; i < rawLines.length; i++) {
         const raw = rawLines[i];
         let line = raw.replace(/^\s+/, '').replace(/\s+$/, '');
         if (line === '') continue;                       // 纯空白行：直接忽略
-        line = line.replace(BPM_MARKER_RE, '');          // 去掉键帽表情 / 带圈数字
-        line = line.replace(/^\s+/, '');
+        const hadMarker = bpmHasMarker(line);            // 这一行本来有没有方块数字
+        if (stripMarkers) {
+          line = line.replace(BPM_MARKER_RE, '');        // 去掉键帽表情 / 带圈数字
+          line = line.replace(/^\s+/, '');
+        }
         if (stripPlainNum) line = line.replace(BPM_PLAIN_NUM_RE, '').replace(/^\s+/, '');
         if (line === '') continue;                       // 只剩标记的行也忽略
         const blocks = bpmSplitBlocks(line);
         if (blocks.length === 0) continue;
-        entries.push({ lineNo: i + 1, raw: raw, blocks: blocks });
+        entries.push({ lineNo: i + 1, raw: raw, blocks: blocks, hadMarker: hadMarker });
         blockCountFreq[blocks.length] = (blockCountFreq[blocks.length] || 0) + 1;
       }
 
@@ -2427,8 +2451,13 @@
         const notes = [];
         const blocks = entry.blocks;
 
-        if (!commonCounts[blocks.length]) notes.push('blockMismatch');
-        if (blocks.length === 1 && blocksCfg.length >= 2) notes.push('singleBlock');
+        // 说明：不删方块编号时，"2️⃣裸色22"这种（编号紧贴产品、中间没空格）本来就是一个信息块，
+        // 块数和别的行一样，不会误报。只有"2️⃣ 裸色22"（编号后有空格）才会多出一个块，
+        // 那种情况下方块编号自己占了一块 —— 这一行不该被判成"块数异常"，所以放过它。
+        const markerExcused = (!stripMarkers && entry.hadMarker && blocks.length > 1 &&
+                               /^[0-9]\uFE0F?\u20E3$|^[\u2460-\u2473]$/.test(blocks[0]));
+        if (!commonCounts[blocks.length] && !markerExcused) notes.push('blockMismatch');
+        if (blocks.length === 1 && blocksCfg.length >= 2 && !markerExcused) notes.push('singleBlock');
         if (blocks.length > blocksCfg.length) notes.push('extraBlock');
 
         const values = {};
@@ -3729,10 +3758,24 @@
     function openBpmSchemeSettings() {
       renderBpmMapping();
       renderBpmBatchDefaults();
+      syncBpmStripMarkersCheckbox();
       const nameInput = document.getElementById('bpmSchemeNameInput');
       const sc = bpmCurrentScheme();
       if (nameInput && sc) nameInput.value = sc.name;
       document.getElementById('bpmSchemeModal').classList.add('show');
+    }
+    // 方块编号开关：跟着当前方案的配置走
+    function syncBpmStripMarkersCheckbox() {
+      const cb = document.getElementById('bpmStripMarkers');
+      if (!cb || !_bpmConfig) return;
+      cb.checked = !(_bpmConfig.stripMarkers === false);
+    }
+    function onBpmStripMarkersChange(checked) {
+      if (!_bpmConfig) return;
+      _bpmConfig.stripMarkers = !!checked;
+      // 和别的设置一样：只改内存，写回方案交给"完成/切换"时统一处理
+      renderBpmSchemeSummary();
+      refreshBpmPreview();
     }
     function closeBpmSchemeSettings() {
       bpmFlushCurrentConfig();          // 关设置时把改动写回当前方案
@@ -3945,11 +3988,14 @@
     function bpmConfigSummary() {
       if (!_bpmConfig || !Array.isArray(_bpmConfig.blocks)) return '';
       const opts = bpmFieldOptions();
-      return _bpmConfig.blocks.map(function (bc, i) {
+      const parts = _bpmConfig.blocks.map(function (bc, i) {
         const f = opts.find(function (x) { return x.key === bc.field; });
         const isIgnore = bc.method === BPM_IGNORE;
         return '第' + (i + 1) + '块→' + (isIgnore ? '忽略' : (f ? f.label : '—'));
-      }).join('　');
+      });
+      // 方块编号删不删也要一眼看见（用户明确要求"只有确定的方案才删"）
+      parts.push(_bpmConfig.stripMarkers === false ? '方块编号：保留' : '方块编号：删除');
+      return parts.join('　');
     }
     function renderBpmSchemeSummary() {
       const el = document.getElementById('bpmSchemeSummary');
@@ -3966,6 +4012,7 @@
       if (!_bpmConfig.defaults) _bpmConfig.defaults = {};
       renderBpmSchemeSelect();
       renderBpmSchemeSummary();
+      syncBpmStripMarkersCheckbox();
       const nameInput = document.getElementById('bpmSchemeNameInput');
       if (nameInput) nameInput.value = sc.name;
       refreshBpmPreview();
@@ -9349,7 +9396,7 @@
     bootstrap();
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.09.17-6'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.09.22-1'; // 每次修改系统时改一下版本号即可触发更新
     // 规则：YYYY.MM.DD-N，日期必须是【当天真实日期】，N 是当天第几次修改。
     // 历史教训：曾经照着前一天的日期往下累加，导致版本号日期失真（铁律 1 说的就是这个坑）。
 
@@ -9358,6 +9405,20 @@
     // 说明：2026.09.13-6 ~ -21 是按当时（9/13 起）连续的改动号，日期沿用当时发布的号；
     //       从 2026.09.15-1 起严格按"当天真实日期-当天序号"执行。
     const APP_CHANGELOG = [
+      {
+        ver: '2026.09.22-1', date: '2026-09-22',
+        items: [
+          ['✨ 新增', [
+            '批量录入：方块编号（如 2️⃣）删不删，改为由【每个方案自己决定】',
+            '方案设置里新增开关「自动去掉行首的方块编号」：勾上就丢掉，不勾就原样保留在内容里',
+            '主界面方案旁边会写明当前是「方块编号：删除」还是「方块编号：保留」，一眼能看出'
+          ]],
+          ['📌 说明', [
+            '默认仍然是删除（方便日常录入）；要用「原样照搬」这类方案时，把那个开关取消勾选即可',
+            '改动只影响批量录入的解析，不影响任何已有订单数据'
+          ]]
+        ]
+      },
       {
         ver: '2026.09.17-6', date: '2026-09-17',
         items: [
