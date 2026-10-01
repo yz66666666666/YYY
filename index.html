@@ -417,6 +417,24 @@
   .bpm-scroll { max-height: 320px; min-height: 150px; overflow-y: auto; overflow-x: hidden; position: relative; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
   .bpm-empty { padding: 26px 12px; text-align: center; color: #999; font-size: 13px; }
 
+  /* ===== 操作详情弹窗（看"哪一单、哪个字段、从什么改成什么"） ===== */
+  .ad-list { display: flex; flex-direction: column; gap: 6px; }
+  .ad-row {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px;
+    padding: 8px 10px; background: #fafbfc; border: 1px solid #eef1f6; border-radius: 6px;
+    font-size: 13px;
+  }
+  .ad-row .ad-order { flex: 1 1 100%; color: #333; font-weight: 500; word-break: break-all; }
+  .ad-row .ad-field { color: #888; font-size: 12px; flex: none; }
+  .ad-row .ad-change { flex: 1 1 auto; min-width: 0; word-break: break-all; }
+  .ad-row .ad-from { color: #a8071a; text-decoration: line-through; }
+  .ad-row .ad-arrow { color: #bbb; margin: 0 4px; }
+  .ad-row .ad-to { color: #237804; font-weight: 600; }
+  @media (max-width: 560px) {
+    .ad-row { font-size: 12px; padding: 7px 8px; }
+    .ad-row .ad-change { flex: 1 1 100%; }
+  }
+
   /* Toast 提示 */
   .toast-tip { position: fixed; left: 50%; top: 24px; transform: translateX(-50%); background: rgba(30,30,30,0.92); color: #fff; padding: 10px 18px; border-radius: 6px; font-size: 14px; z-index: 2000; box-shadow: 0 4px 12px rgba(0,0,0,0.2); opacity: 0; transition: opacity 0.25s; pointer-events: none; max-width: 90vw; }
   .toast-tip.show { opacity: 1; }
@@ -472,6 +490,20 @@
     <div class="modal-ftr">
       <button class="btn btn-secondary" onclick="closeInputModal()">取消</button>
       <button class="btn btn-primary" onclick="inputModalOk()">确定</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 操作详情（看某一次操作到底改了什么） ============ -->
+<div class="modal-mask" id="actionDetailModal" style="z-index:1700;">
+  <div class="modal bpm-modal">
+    <div class="modal-hdr">
+      <h3 id="actionDetailTitle">操作详情</h3>
+      <button class="close-x" onclick="closeActionDetail()">×</button>
+    </div>
+    <div class="modal-body" id="actionDetailBody"></div>
+    <div class="modal-ftr">
+      <button class="btn btn-secondary" onclick="closeActionDetail()">关闭</button>
     </div>
   </div>
 </div>
@@ -1550,13 +1582,99 @@
     }
 
     // 添加一条备份
-    function addBackup(storeName, data, label) {
+    // ==================== 操作详情（让操作历史能看出"到底改了什么"） ====================
+    // 用户需求（2026-09-22）：操作历史只写"行内编辑: 状态"太模糊，
+    // 数据不对时无法定位是哪一条订单、从什么改成了什么。
+    // 做法：任何改动在 saveData 之前先 setActionDetail({...})，
+    //       saveData 会把它随快照一起存进操作历史，列表和详情弹窗直接展示。
+    let _lastActionDetail = null;
+    function setActionDetail(d) {
+      if (!d || typeof d !== 'object') return;
+      if (!Array.isArray(d.changes)) d.changes = [];
+      _lastActionDetail = d;
+    }
+    // 取走详情并清空（避免把上一次的详情粘到下一次操作上）
+    function consumeActionDetail() {
+      const d = _lastActionDetail;
+      _lastActionDetail = null;
+      return d;
+    }
+    function orderBrief(o) {
+      if (!o) return '(订单已不存在)';
+      const no = o.orderNo || '';
+      // 再找一个"人认得出来"的字段：产品内容 / 收件人
+      const fContent = fieldsConfig.find(x => x.key === 'content');
+      const fCust = fieldsConfig.find(x => x.key === 'customer');
+      const parts = [];
+      if (no) parts.push(no);
+      if (fContent && o[fContent.key]) parts.push(String(o[fContent.key]).slice(0, 30));
+      if (fCust && o[fCust.key]) parts.push(String(o[fCust.key]).slice(0, 12));
+      return parts.join(' · ') || ('订单 ' + String(o.id || '').slice(-6));
+    }
+    // 把字段值转成"人看得懂"的文字。
+    // 关键：下拉字段存的是内部值（pending / done），直接显示出来用户根本看不懂 ——
+    // 必须换成显示文字（待处理 / 已发货）。这正是用户反馈"看不懂操作历史"的原因之一。
+    function fmtFieldVal(v, fieldKey) {
+      if (v === null || v === undefined || v === '') return '(空)';
+      if (typeof v === 'object') {
+        const t = v.text ? String(v.text) : '';
+        const img = v.image ? '[图片]' : '';
+        const s = (img + t).trim();
+        return s || '[内容]';
+      }
+      let s = String(v);
+      const f = fieldKey ? fieldsConfig.find(x => x.key === fieldKey) : null;
+      if (f && f.type === 'select' && Array.isArray(f.options)) {
+        const o = f.options.find(x => String(x.value) === s);
+        if (o && o.label) s = o.label;
+      }
+      return s.length > 60 ? s.slice(0, 60) + '…' : s;
+    }
+    // 记录"某一条订单的某个字段被改"
+    function detailEditField(order, fieldKey, oldVal, newVal) {
+      const f = fieldsConfig.find(x => x.key === fieldKey);
+      setActionDetail({
+        kind: 'edit',
+        changes: [{
+          type: 'field',
+          orderId: order.id,
+          orderLabel: orderBrief(order),
+          fieldKey: fieldKey,
+          fieldLabel: f ? f.label : fieldKey,
+          from: oldVal,
+          to: newVal
+        }]
+      });
+    }
+
+    // 记录"某条订单整体"的变化（新增 / 删除）
+    function detailOrderChange(type, order) {
+      setActionDetail({
+        kind: type,
+        changes: [{ type: type, orderId: order.id, orderLabel: orderBrief(order) }]
+      });
+    }
+
+    // 构造一条备份记录。单独抽出来是为了能被测试直接验证
+    // （详情必须真的写进记录里，否则操作历史又退回"只看得到模糊操作"）。
+    function buildBackupRecord(data, label, detail) {
+      return {
+        timestamp: Date.now(),
+        label: label || '',
+        orderCount: (data && data.orders ? data.orders.length : 0),
+        data: data,
+        detail: detail || null
+      };
+    }
+
+    function addBackup(storeName, data, label, detail) {
       if (!backupDB) return Promise.resolve();
       return new Promise((resolve) => {
         try {
           const tx = backupDB.transaction(storeName, 'readwrite');
           const store = tx.objectStore(storeName);
           const countReq = store.count();
+          const rec = buildBackupRecord(data, label, detail);
           countReq.onsuccess = function() {
             const count = countReq.result;
             // 如果超限，先删最旧的
@@ -1568,21 +1686,11 @@
                 if (cursor) {
                   store.delete(cursor.primaryKey);
                   // 继续添加
-                  store.add({
-                    timestamp: Date.now(),
-                    label: label || '',
-                    orderCount: (data.orders || []).length,
-                    data: data
-                  });
+                  store.add(rec);
                 }
               };
             } else {
-              store.add({
-                timestamp: Date.now(),
-                label: label || '',
-                orderCount: (data.orders || []).length,
-                data: data
-              });
+              store.add(rec);
             }
           };
           tx.oncomplete = function() { resolve(); };
@@ -1772,7 +1880,8 @@
     function saveHistorySnapshot(action) {
       if (!backupDB) return;
       const snapshot = getCurrentSnapshot();
-      addBackup('history', snapshot, action || '操作').then(() => {
+      const detail = consumeActionDetail();
+      addBackup('history', snapshot, action || '操作', detail).then(() => {
         lastHistorySnapshot = snapshot;
       });
     }
@@ -1875,7 +1984,9 @@
     // 当前备份标签页
     let currentBackupTab = 'shortTerm';
     // 内联确认状态（避免在 modal 内使用浏览器原生 confirm/alert 导致滚动崩溃）
-    let pendingBackupAction = null; // { type: 'restore'|'clear', storeName, id? }
+    // { type: 'restore'|'clear', storeName, id? }
+    let pendingBackupAction = null;
+    let _curBackupList = [];   // 当前展示的备份列表（详情弹窗按 id 回查用）
 
     // 历史备份弹窗
     function openHistoryBackup() {
@@ -1903,11 +2014,74 @@
       });
       renderBackupList(tab);
     }
+    // 操作详情 → 一行摘要（列表里直接能看见"改了什么"）
+    function actionDetailSummary(detail) {
+      if (!detail || !Array.isArray(detail.changes) || detail.changes.length === 0) return '';
+      const c = detail.changes[0];
+      if (c.type === 'field') {
+        const head = c.fieldLabel + '：' + fmtFieldVal(c.from, c.fieldKey) + ' → ' + fmtFieldVal(c.to, c.fieldKey);
+        if (detail.kind === 'batch') {
+          const shown = detail.changes.length;
+          const total = detail.batchTotal || shown;
+          return '共改 ' + total + ' 条' + (shown < total ? '（下方列出前 ' + shown + ' 条）' : '') + '　例：' + c.orderLabel + '　' + head;
+        }
+        return c.orderLabel + '　' + head;
+      }
+      if (c.type === 'add') return '新增：' + c.orderLabel + (detail.changes.length > 1 ? ' 等 ' + detail.changes.length + ' 条' : '');
+      if (c.type === 'delete') return '删除：' + c.orderLabel + (detail.changes.length > 1 ? ' 等 ' + detail.changes.length + ' 条' : '');
+      return '';
+    }
+    function openActionDetail(id) {
+      const list = _curBackupList || [];
+      const item = list.find(x => x.id === id);
+      if (!item || !item.detail) { showToast('这条记录没有更多详情'); return; }
+      const d = item.detail;
+      const time = new Date(item.timestamp).toLocaleString('zh-CN', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+      document.getElementById('actionDetailTitle').innerText = item.label || '操作详情';
+      let html = '<div style="font-size:12px;color:#888;margin-bottom:10px;">' + time +
+        '　订单总数：<b>' + (item.orderCount || 0) + '</b></div>';
+      if (d.kind === 'batch' && d.batchTotal) {
+        html += '<div class="bpm-warn info" style="margin-bottom:10px;">批量操作：共影响 <b>' + d.batchTotal +
+          '</b> 条订单；下面列出其中 <b>' + d.changes.length + '</b> 条真正发生变化的。</div>';
+      }
+      if (!d.changes.length) {
+        html += '<div style="color:#999;padding:12px 0;">这条记录没有可展示的字段变化（可能是纯设置类操作）。</div>';
+      } else {
+        html += '<div class="ad-list">';
+        d.changes.forEach(function (c) {
+          if (c.type === 'field') {
+            html += '<div class="ad-row">' +
+              '<div class="ad-order">' + escapeHtml(c.orderLabel || '') + '</div>' +
+              '<div class="ad-field">' + escapeHtml(c.fieldLabel || c.fieldKey || '') + '</div>' +
+              '<div class="ad-change">' +
+                '<span class="ad-from">' + escapeHtml(fmtFieldVal(c.from, c.fieldKey)) + '</span>' +
+                '<span class="ad-arrow">→</span>' +
+                '<span class="ad-to">' + escapeHtml(fmtFieldVal(c.to, c.fieldKey)) + '</span>' +
+              '</div>' +
+            '</div>';
+          } else {
+            html += '<div class="ad-row">' +
+              '<div class="ad-order">' + escapeHtml(c.orderLabel || '') + '</div>' +
+              '<div class="ad-field">' + (c.type === 'add' ? '新增订单' : '删除订单') + '</div>' +
+              '<div class="ad-change">—</div>' +
+            '</div>';
+          }
+        });
+        html += '</div>';
+      }
+      document.getElementById('actionDetailBody').innerHTML = html;
+      document.getElementById('actionDetailModal').classList.add('show');
+    }
+    function closeActionDetail() {
+      document.getElementById('actionDetailModal').classList.remove('show');
+    }
+
     function renderBackupList(storeName) {
       const el = document.getElementById('backupList');
       if (!el) return;
       el.innerHTML = '<div style="text-align:center;color:#999;padding:20px;">加载中...</div>';
       getAllBackups(storeName).then(list => {
+        _curBackupList = list;   // 详情弹窗要按 id 回查这条记录
         if (!backupDB) {
           el.innerHTML = '<div style="text-align:center;color:#999;padding:20px;">当前浏览器不支持 IndexedDB，无法使用备份功能。<br>建议使用 Chrome / Safari / Edge 等现代浏览器。</div>';
           return;
@@ -1958,13 +2132,18 @@
           } else {
             btns = '<button class="btn btn-primary btn-sm" onclick="askRestoreBackup(\'' + storeName + '\', ' + item.id + ')">恢复</button>';
           }
-          html += '<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#f9f9f9;border:1px solid ' +
+          const summary = actionDetailSummary(item.detail);
+          html += '<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:#f9f9f9;border:1px solid ' +
             (isPendingRestore ? '#cf1322' : (isRicher ? '#ffbb96' : '#e8e8e8')) + ';border-radius:6px;' +
             (isPendingRestore ? 'background:#fff5f5;' : (isRicher ? 'background:#fff7e6;' : '')) + '">' +
-            '<div style="flex:1;">' +
+            '<div style="flex:1;min-width:0;">' +
               '<div style="font-size:13px;font-weight:500;color:#333;">' + label + '</div>' +
               '<div style="font-size:11px;color:#999;margin-top:2px;">' + time + ' · <b' + (isRicher ? ' style="color:#ad4e00;"' : '') + '>' + count + ' 条订单</b>' +
               (isRicher ? ' <span style="color:#ad4e00;">← 比现在多</span>' : '') + '</div>' +
+              (summary
+                ? '<div style="font-size:12px;color:#0958d9;margin-top:5px;line-height:1.6;word-break:break-all;">' + escapeHtml(summary) +
+                  ' <a href="javascript:void(0)" onclick="openActionDetail(' + item.id + ')" style="color:#1a73e8;white-space:nowrap;">查看详情 ›</a></div>'
+                : '<div style="font-size:11px;color:#bbb;margin-top:4px;">（这条没有记录字段详情）</div>') +
             '</div>' +
             btns +
           '</div>';
@@ -4547,6 +4726,7 @@
       bpmShowProgress(0.1, '正在备份当前数据…');
       // 备份（撤销依据 + 历史备份双保险）
       const beforeSnapshot = getCurrentSnapshot();
+      consumeActionDetail();   // 导入"之前"的备份不该带任何改动详情
       try {
         addBackup('history', beforeSnapshot, '批量录入前 ' + new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }));
       } catch (e) { /* 备份失败不阻断，但下面的撤销仍可用内存快照 */ }
@@ -4567,6 +4747,13 @@
 
           bpmShowProgress(0.7, '正在写入 ' + preview.length + ' 条订单…');
           preview.slice().reverse().forEach(function (o) { orders.unshift(o); });
+          setActionDetail({
+            kind: 'add',
+            batchTotal: preview.length,
+            changes: preview.slice(0, 50).map(function (o) {
+              return { type: 'add', orderId: o.id, orderLabel: orderBrief(o) };
+            })
+          });
           statAddOrders(preview);
           saveData('批量录入 ' + preview.length + ' 条');
 
@@ -6782,6 +6969,7 @@
         pushToDefaults(newOrder);
         orders.unshift(newOrder);
         statAddOrders([newOrder]);
+        detailOrderChange('add', newOrder);   // 操作历史里记下新增的是哪一单
       }
       saveData(editingId ? '编辑订单' : '新增订单');
       render();
@@ -6823,7 +7011,10 @@
         const removed = orders.find(o => o.id === id);
         orders = orders.filter(o => o.id !== id);
         selectedOrders.delete(id);
-        if (removed) statRemoveOrders([removed]);   // 统计栏增量：只减掉这一条
+        if (removed) {
+          statRemoveOrders([removed]);   // 统计栏增量：只减掉这一条
+          detailOrderChange('delete', removed);   // 操作历史里记下被删的是哪一单
+        }
         saveData('删除订单');
         render();
       };
@@ -8000,7 +8191,9 @@
         return;
       }
       statPrepareEdit(order);           // 先备好"改之前的副本"，供统计栏算差值
+      const _oldVal = order[field.key]; // 记下改之前的值，写进操作历史（用户要能看出从什么改成什么）
       order[field.key] = value;
+      detailEditField(order, field.key, _oldVal, value);
       saveData('行内编辑: ' + field.label);
       afterCellEdit(order.id);
       closeInlineEditor();
@@ -8046,6 +8239,24 @@
       const targets = orders.filter(o => selectedOrders.has(o.id));
       if (targets.length === 0) { showToast('⚠️ 没有选中任何订单'); closeInlineEditor(); return; }
       const changed = targets.filter(o => (o[fieldKey] === undefined ? '' : o[fieldKey]) !== newVal).length;
+      // 记下"批量修改"的详情：哪些订单、从什么改成什么（只记真正变了的，最多前 50 条）
+      const bChanges = [];
+      targets.forEach(function (o) {
+        const oldV = (o[fieldKey] === undefined ? '' : o[fieldKey]);
+        if (oldV === newVal) return;
+        if (bChanges.length < 50) {
+          bChanges.push({
+            type: 'field',
+            orderId: o.id,
+            orderLabel: orderBrief(o),
+            fieldKey: fieldKey,
+            fieldLabel: field ? field.label : fieldKey,
+            from: oldV,
+            to: newVal
+          });
+        }
+      });
+      setActionDetail({ kind: 'batch', batchTotal: targets.length, changes: bChanges });
       // 统计栏增量：批量改动同样只记差值，不重算全部
       statEditBegin();
       targets.forEach(o => { statEditSnapshot(o); o[fieldKey] = newVal; pushToDefaults(o); });
@@ -8121,8 +8332,10 @@
         return;
       }
       statPrepareEdit(order);           // 先备好"改之前的副本"，供统计栏算差值
+      const _oldVal2 = order[field.key];
       order[field.key] = newVal;
       pushToDefaults(order);
+      detailEditField(order, field.key, _oldVal2, newVal);
       saveData('行内编辑: ' + field.label);
       afterCellEdit(order.id);
       closeInlineEditor();
@@ -9398,7 +9611,7 @@
     bootstrap();
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.09.22-2'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.10.02-1'; // 每次修改系统时改一下版本号即可触发更新
     // 规则：YYYY.MM.DD-N，日期必须是【当天真实日期】，N 是当天第几次修改。
     // 历史教训：曾经照着前一天的日期往下累加，导致版本号日期失真（铁律 1 说的就是这个坑）。
 
@@ -9407,6 +9620,20 @@
     // 说明：2026.09.13-6 ~ -21 是按当时（9/13 起）连续的改动号，日期沿用当时发布的号；
     //       从 2026.09.15-1 起严格按"当天真实日期-当天序号"执行。
     const APP_CHANGELOG = [
+      {
+        ver: '2026.10.02-1', date: '2026-10-02',
+        items: [
+          ['✨ 新增', [
+            '操作历史能看详情了：每条记录下面直接写明「哪一单 · 哪个字段 · 从什么改成什么」',
+            '点「查看详情 ›」可以看到这次操作影响的完整清单（批量修改会列出每一条的变化）',
+            '下拉字段会自动翻译成人话（显示「待处理 → 已发货」，而不是 pending → done）',
+            '新增、删除、批量修改、批量导入也都会记录详情'
+          ]],
+          ['📌 说明', [
+            '从这一版起新产生的操作会带详情；之前的旧记录没有详情，会显示「这条没有记录字段详情」，属正常'
+          ]]
+        ]
+      },
       {
         ver: '2026.09.22-2', date: '2026-09-22',
         items: [
