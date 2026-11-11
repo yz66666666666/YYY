@@ -1050,22 +1050,30 @@
         </table>
       </div>
       <div style="margin-bottom:14px;">
-        <h4 style="margin:0 0 8px 0;color:#722ed1;">🧮 整体计算：在字段名前加「总」</h4>
+        <h4 style="margin:0 0 8px 0;color:#722ed1;">🧮 整体计算：「总」是一个"求和算符"</h4>
         <div style="font-size:13px;color:#555;line-height:1.8;margin-bottom:8px;">
-          <b>总售价</b> = 所有<b>选中</b>订单的「售价」加起来的总和。
-          所以同一个公式里可以同时用"这一单的值"和"合计值"。
-          <br>这是算<b>整体利润率</b>这类"不能逐单算"的指标用的：单笔利润率求平均 ≠ 整体利润率。
+          <b>「总」把它后面的那个值，在每条选中订单上各算一遍，再全部加起来。</b>
+          <br>它后面的值可以是<b>字段名</b>，也可以是<b>括号里的算式</b>：
         </div>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:8px;">
+          <tr style="background:#f5f5f5;"><th style="padding:6px 10px;text-align:left;border:1px solid #e8e8e8;width:42%;">写法</th><th style="padding:6px 10px;text-align:left;border:1px solid #e8e8e8;">意思</th></tr>
+          <tr><td style="padding:6px 10px;border:1px solid #e8e8e8;font-family:monospace;">总售价</td><td style="padding:6px 10px;border:1px solid #e8e8e8;">所有选中订单的售价加起来总和</td></tr>
+          <tr><td style="padding:6px 10px;border:1px solid #e8e8e8;font-family:monospace;">总(售价 - 进价)</td><td style="padding:6px 10px;border:1px solid #e8e8e8;">每条订单先算"售价-进价"，再把结果全部加起来（= 总利润）</td></tr>
+          <tr><td style="padding:6px 10px;border:1px solid #e8e8e8;font-family:monospace;">总(售价 / 进价)</td><td style="padding:6px 10px;border:1px solid #e8e8e8;">每条订单先算比值，再求和（<b>总售价/总进价 是另一个意思</b>，别弄混）</td></tr>
+          <tr><td style="padding:6px 10px;border:1px solid #e8e8e8;font-family:monospace;">总(1)</td><td style="padding:6px 10px;border:1px solid #e8e8e8;">每条订单算 1，求和 = <b>订单数</b>（可用来算平均每单）</td></tr>
+        </table>
         <div style="font-size:13px;line-height:1.9;">
-          <div>📊 <b>整体利润率</b>：<code style="background:#f5f5f5;padding:2px 6px;border-radius:3px;">(总售价 - 总进价) / 总售价 * 100</code></div>
-          <div>💰 <b>整体毛利</b>：<code style="background:#f5f5f5;padding:2px 6px;border-radius:3px;">总售价 - 总进价</code></div>
+          <div>📊 <b>整体利润率</b>：<code style="background:#f5f5f5;padding:2px 6px;border-radius:3px;">(总售价 - 总进价) / 总售价 * 100</code>　或　<code style="background:#f5f5f5;padding:2px 6px;border-radius:3px;">总(售价 - 进价) / 总售价 * 100</code></div>
+          <div>💰 <b>整体毛利</b>：<code style="background:#f5f5f5;padding:2px 6px;border-radius:3px;">总(售价 - 进价)</code></div>
           <div>📈 <b>这一单占总销售额的比例</b>：<code style="background:#f5f5f5;padding:2px 6px;border-radius:3px;">round(售价 / 总售价 * 100, 2)</code></div>
+          <div>🧮 <b>平均每单利润</b>：<code style="background:#f5f5f5;padding:2px 6px;border-radius:3px;">总(售价 - 进价) / 总(1)</code></div>
         </div>
         <div style="margin-top:8px;padding:8px 10px;background:#fffbe6;border:1px solid #ffe58f;border-radius:6px;font-size:12px;color:#ad6800;line-height:1.7;">
-          注意 3 点：<br>
-          ① 「总X」统计的是<b>你选中的那些订单</b>，不是全部订单。<br>
-          ② 空值不算进合计，但结果页会告诉你<b>哪一项缺了几单</b> —— 缺数据会让合计偏小、利润率虚高。<br>
-          ③ 「总X」本身就是一个总数，所以 <code>总售价 * 2</code> 是"总售价×2"，不是每单×2。
+          注意 4 点：<br>
+          ① 「总」统计的是<b>你选中的那些订单</b>，不是全部订单。<br>
+          ② 空值不算进合计，结果页会告诉你<b>哪一项缺了几单</b> —— 缺数据会让合计偏小、利润率虚高。<br>
+          ③ 「总X」本身就是一个总数，所以 <code>总售价 * 2</code> 是"总售价×2"，不是每单×2。<br>
+          ④ 括号里有一点算不出（比如除以 0），整个「总(...)」就算不出，会显示「—」，不会给一个错数。
         </div>
       </div>
       <div style="margin-bottom:14px;">
@@ -2794,14 +2802,30 @@
       }
       // 无匹配分组时，用主公式兜底（主公式可为空，此时返回空）
       if (!field.formula) return '';
+      return evalExprPipeline(field.formula, order, _agg, depth);
+    }
+
+    // 公式求值的执行管线：把一段"公式文字"在【某一条订单】上算出一个数。
+    // 单独抽出来是因为「总(表达式)」需要"对每条订单各算一遍再求和"，靠它递归调用。
+    function evalExprPipeline(rawFormula, order, _agg, depth) {
       try {
-        let expr = field.formula.trim();
+        let expr = String(rawFormula == null ? '' : rawFormula).trim();
         // 自动把中文全角符号转成英文半角，避免误用全角符号导致计算失败
         expr = expr
           .replace(/（/g, '(').replace(/）/g, ')')
           .replace(/×/g, '*').replace(/÷/g, '/')
           .replace(/－/g, '-').replace(/＋/g, '+')
           .replace(/，/g, ',').replace(/。/g, '.');
+        // ① 「总」是求和算子：把紧跟其后的那个值（字段名，或括号里的表达式）
+        //    在【每条选中订单】上各算一遍，再把结果全部加起来。
+        //    例：总(售价 - 进价) = 每条订单先算(售价-进价)，再求和 = 总利润
+        //    例：总(1) = 每条订单都算 1，求和 = 订单数
+        //    必须在"字段替换"之前展开，否则 售价 会先被替换成具体数字。
+        if (_agg && _agg.orders && expr.indexOf('总') >= 0) {
+          const expanded = expandTotalGroups(expr, _agg, depth);
+          if (expanded === null) return '';
+          expr = expanded;
+        }
         // 同时支持英文名(key)和中文名(label)
         const substitutions = {};
         fieldsConfig.forEach(f => {
@@ -2971,6 +2995,71 @@
         return '';
       }
     }
+
+    // ==================== 「总」算子：对表达式逐单求值再求和 ====================
+    // 用户的原话（2026-11-11）："把这个总看成一个算子或者算符…
+    //   总会将后面作用的数值，每个订单的单独数值求和，然后再计算"
+    // 所以 总 是一元前缀算子，作用于"紧跟其后的那个值"：
+    //   总售价        → 对每条订单的 售价 求和（老写法，等价于 总(售价)）
+    //   总(售价-进价) → 对每条订单的 (售价-进价) 求和
+    //   总(1)        → 每条订单都是 1，求和 = 订单数
+    //   总(售价/进价) → 每条订单先算比值，再求和（这是前缀写法做不到的）
+
+    // 找"最内层的 总( ... )"（里面不含另一个 总( ，保证内层先展开）
+    function findInnermostTotalGroup(expr) {
+      const re = /总\s*\(/g;
+      let m;
+      while ((m = re.exec(expr))) {
+        const openIdx = m.index + m[0].length - 1;   // '(' 所在位置
+        let d = 0, j = openIdx;
+        for (; j < expr.length; j++) {
+          if (expr[j] === '(') d++;
+          else if (expr[j] === ')') { d--; if (d === 0) break; }
+        }
+        if (j >= expr.length) continue;              // 括号不配对 → 这一处跳过
+        const inner = expr.substring(openIdx + 1, j);
+        if (/总\s*\(/.test(inner)) continue;         // 里面还有 总( → 先展开内层
+        return { start: m.index, end: j + 1, inner: inner };
+      }
+      return null;
+    }
+
+    // 把表达式里所有「总(...)」替换成它们各自的合计值。
+    // 失败（某条订单算不出/括号不配对）返回 null —— 外层会显示"算不出"，绝不瞎算。
+    function expandTotalGroups(expr, agg, depth) {
+      if (depth > 10) return null;
+      let guard = 0;
+      while (guard++ < 50) {
+        const hit = findInnermostTotalGroup(expr);
+        if (!hit) break;
+        const inner = hit.inner.trim();
+        if (!inner) return null;
+        // 缓存：同一条组合在"一次计算"里只算一遍。
+        // 没有这个缓存，外层公式对每条订单求值时都会重算一次 → O(N²)，
+        // 1600 条订单会直接卡死（1700² ≈ 289 万次求值）。
+        if (!agg.totalCache) agg.totalCache = {};
+        agg.hasExprGroup = true;   // 标记"确实用了 总(表达式)"，供结果页说明用
+        let sum;
+        if (Object.prototype.hasOwnProperty.call(agg.totalCache, inner)) {
+          sum = agg.totalCache[inner];
+        } else {
+          let acc = 0, bad = false;
+          for (let i = 0; i < agg.orders.length; i++) {
+            const v = evalExprPipeline(inner, agg.orders[i], agg, depth + 1);
+            if (v === '' || v === null || v === undefined) { bad = true; break; }
+            const n = Number(v);
+            if (!isFinite(n)) { bad = true; break; }
+            acc += n;
+          }
+          if (bad) return null;
+          sum = Math.round(acc * 1e6) / 1e6;
+          agg.totalCache[inner] = sum;
+        }
+        expr = expr.slice(0, hit.start) + '(' + sum + ')' + expr.slice(hit.end);
+      }
+      return expr;
+    }
+
     // 辅助函数：拆分函数参数（处理嵌套括号）
     function splitArgs(str) {
       const result = [];
@@ -7607,10 +7696,20 @@
 
     // 计算合计上下文：{ sums, counts, missing, totalOrders, fields, collisions }
     function bcComputeAggregates(orders, formulaTexts) {
-      const res = { sums: {}, counts: {}, missing: {}, totalOrders: (orders || []).length, fields: [], collisions: [] };
+      const res = {
+        sums: {}, counts: {}, missing: {},
+        totalOrders: (orders || []).length,
+        // 「总(...)」算子需要"对每条订单各算一遍"，所以要把订单列表带上
+        orders: orders || [],
+        fields: [],
+        collisions: [],
+        usedTotal: false,      // 公式里到底有没有用「总」
+        totalCache: {}         // 「总(表达式)」的合计缓存（一次计算内复用，避免 O(N²)）
+      };
       if (!orders || !orders.length) return res;
       const texts = bcCollectFormulaTexts(Array.isArray(formulaTexts) ? formulaTexts : [formulaTexts]);
       if (!texts.length) return res;
+      res.usedTotal = texts.some(function (t) { return String(t).indexOf('总') >= 0; });
 
       fieldsConfig.forEach(function (f) {
         if (!f || !f.key) return;
@@ -7642,9 +7741,12 @@
 
     // 结果页里展示"计算依据"（让用户能核对，也能看出哪些单缺数据）
     function bcAggPanelHtml(agg) {
-      if (!agg || !agg.fields || agg.fields.length === 0) return '';
+      if (!agg) return '';
+      const hasFields = agg.fields && agg.fields.length > 0;
+      const hasExprGroups = !!(agg.usedTotal || agg.hasExprGroup);
+      if (!hasFields && !hasExprGroups) return '';
       let rows = '';
-      agg.fields.forEach(function (k) {
+      (agg.fields || []).forEach(function (k) {
         const f = fieldsConfig.find(function (x) { return x.key === k; });
         if (!f) return;
         const sum = agg.sums[k];
@@ -7660,9 +7762,15 @@
           '</div>';
       });
       let html = '<div style="margin-top:10px;padding:10px 12px;border:1px solid #d3adf7;background:#f9f0ff;border-radius:8px;">' +
-        '<div style="font-size:13px;font-weight:600;color:#722ed1;margin-bottom:2px;">📐 计算依据（「总X」= 选中订单的合计）</div>' +
+        '<div style="font-size:13px;font-weight:600;color:#722ed1;margin-bottom:2px;">📐 计算依据（「总」= 选中订单的合计）</div>' +
         '<div style="font-size:12px;color:#8c8c8c;margin-bottom:6px;">共统计 ' + agg.totalOrders + ' 个选中订单；空值不计入合计。</div>' +
         rows;
+      // 只要用了「总(表达式)」，就说明一句（即使同时也有字段合计）
+      if (agg.hasExprGroup) {
+        html += '<div style="margin-top:6px;font-size:12px;color:#722ed1;line-height:1.7;">' +
+          '这条公式用了「总(...)」：把括号里的算式在 <b>' + agg.totalOrders + '</b> 个选中订单上各算一遍，再求和。' +
+          '（括号里只要有一条订单算不出，整体就算不出，结果会显示「—」）</div>';
+      }
       if (agg.collisions && agg.collisions.length) {
         agg.collisions.forEach(function (c) {
           html += '<div style="margin-top:6px;font-size:12px;color:#ad4e00;">⚠️ 你的字段里有一个就叫「' +
@@ -7956,7 +8064,7 @@
       // 用到了「总X」且每条订单算出来是同一个数 → 这只是"一个整体结论"，
       // 这时候"求和"没有意义（等于把这个数加了 N 遍），必须说清楚，否则用户会误会。
       const allSame = valid.length > 1 && nums.every(function (v) { return Math.abs(v - nums[0]) < 1e-9; });
-      const usedTotalFields = !!(_bcAgg && _bcAgg.fields && _bcAgg.fields.length);
+      const usedTotalFields = !!(_bcAgg && _bcAgg.usedTotal);
       let html = '';
       if (usedTotalFields && allSame) {
         html += '<div style="padding:12px;background:#f9f0ff;border:1px solid #d3adf7;border-radius:8px;font-size:14px;margin-bottom:8px;">' +
@@ -9888,7 +9996,7 @@
     bootstrap();
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.11.11-1'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.11.11-2'; // 每次修改系统时改一下版本号即可触发更新
     // 规则：YYYY.MM.DD-N，日期必须是【当天真实日期】，N 是当天第几次修改。
     // 历史教训：曾经照着前一天的日期往下累加，导致版本号日期失真（铁律 1 说的就是这个坑）。
 
@@ -9897,6 +10005,22 @@
     // 说明：2026.09.13-6 ~ -21 是按当时（9/13 起）连续的改动号，日期沿用当时发布的号；
     //       从 2026.09.15-1 起严格按"当天真实日期-当天序号"执行。
     const APP_CHANGELOG = [
+      {
+        ver: '2026.11.11-2', date: '2026-11-11',
+        items: [
+          ['✨ 新增', [
+            '「总」现在是真正的算符：它把后面的值在每条订单上各算一遍，再全部加起来',
+            '所以可以写 总(售价 - 进价) = 总利润、总(售价 / 进价) = 各单比值之和、总(1) = 订单数',
+            '平均每单利润：总(售价 - 进价) / 总(1)',
+            '「总售价」这种老写法照样能用（等价于 总(售价)）',
+            '公式说明里加了对照表，写清 总(售价/进价) 和 总售价/总进价 是两回事'
+          ]],
+          ['📌 说明', [
+            '括号里只要有一条订单算不出（比如除以 0），整个「总(...)」就显示「—」，不会给一个错数',
+            '用了「总(...)」会逐单算一遍，订单很多时会多花一点时间（已做缓存，不会越算越慢）'
+          ]]
+        ]
+      },
       {
         ver: '2026.11.11-1', date: '2026-11-11',
         items: [
