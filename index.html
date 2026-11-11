@@ -1050,6 +1050,25 @@
         </table>
       </div>
       <div style="margin-bottom:14px;">
+        <h4 style="margin:0 0 8px 0;color:#722ed1;">🧮 整体计算：在字段名前加「总」</h4>
+        <div style="font-size:13px;color:#555;line-height:1.8;margin-bottom:8px;">
+          <b>总售价</b> = 所有<b>选中</b>订单的「售价」加起来的总和。
+          所以同一个公式里可以同时用"这一单的值"和"合计值"。
+          <br>这是算<b>整体利润率</b>这类"不能逐单算"的指标用的：单笔利润率求平均 ≠ 整体利润率。
+        </div>
+        <div style="font-size:13px;line-height:1.9;">
+          <div>📊 <b>整体利润率</b>：<code style="background:#f5f5f5;padding:2px 6px;border-radius:3px;">(总售价 - 总进价) / 总售价 * 100</code></div>
+          <div>💰 <b>整体毛利</b>：<code style="background:#f5f5f5;padding:2px 6px;border-radius:3px;">总售价 - 总进价</code></div>
+          <div>📈 <b>这一单占总销售额的比例</b>：<code style="background:#f5f5f5;padding:2px 6px;border-radius:3px;">round(售价 / 总售价 * 100, 2)</code></div>
+        </div>
+        <div style="margin-top:8px;padding:8px 10px;background:#fffbe6;border:1px solid #ffe58f;border-radius:6px;font-size:12px;color:#ad6800;line-height:1.7;">
+          注意 3 点：<br>
+          ① 「总X」统计的是<b>你选中的那些订单</b>，不是全部订单。<br>
+          ② 空值不算进合计，但结果页会告诉你<b>哪一项缺了几单</b> —— 缺数据会让合计偏小、利润率虚高。<br>
+          ③ 「总X」本身就是一个总数，所以 <code>总售价 * 2</code> 是"总售价×2"，不是每单×2。
+        </div>
+      </div>
+      <div style="margin-bottom:14px;">
         <h4 style="margin:0 0 8px 0;color:#1677ff;">📋 可用字段</h4>
         <div id="formulaHelpFields" style="display:flex;flex-wrap:wrap;gap:6px;font-size:13px;"></div>
       </div>
@@ -1107,10 +1126,12 @@
           <div id="batchHistory" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
-          <input id="batchCalcFormula" placeholder="如 价格*2 或 round(价格*税率,2)" style="flex:1;padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:14px;" onkeydown="if(event.key==='Enter')execBatchCalc()">
+          <input id="batchCalcFormula" placeholder="如 售价-进价；算整体利润率用 (总售价-总进价)/总售价*100" style="flex:1;padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:14px;" onkeydown="if(event.key==='Enter')execBatchCalc()">
           <button class="btn btn-secondary btn-sm" onclick="openFormulaHelp()">?</button>
           <button class="btn btn-primary" onclick="execBatchCalc()">计算</button>
         </div>
+        <!-- 「总X」的整体计算示例（按你实际的数字字段生成，可点一下填入再改） -->
+        <div id="batchAggHint" style="margin:-6px 0 12px;font-size:12px;color:#722ed1;line-height:1.6;"></div>
       </div>
       <!-- 分组公式模式 -->
       <div id="batchGroupArea" style="display:none;margin-bottom:12px;padding:12px;background:#fafafa;border:1px solid #eee;border-radius:6px;">
@@ -2754,7 +2775,12 @@
     }
 
     // ============ 公式求值 ============
-    function evalFormula(field, order, _depth) {
+    // 公式求值。
+    // _agg（可选）："合计上下文"。传了它，公式里的「总字段名」就代表
+    //   "所有选中订单里该字段的和"（如 总售价 = 所有选中订单的售价合计）。
+    //   不传时行为和以前完全一样（逐单计算），所以旧公式一条都不用改。
+    //   递归调用必须把 _agg 传下去，否则「总」在嵌套公式里会失效。
+    function evalFormula(field, order, _depth, _agg) {
       const depth = _depth || 0;
       if (depth > 10) return ''; // 防止公式互相引用形成死循环
       if (!field || field.type !== 'formula') return '';
@@ -2763,7 +2789,7 @@
         const gv = String(order[field.groupField] === null || order[field.groupField] === undefined ? '' : order[field.groupField]);
         const matched = gv !== '' && field.groupRules[gv] !== undefined ? String(field.groupRules[gv]) : '';
         if (matched.trim() !== '') {
-          return evalFormula({ type: 'formula', formula: matched }, order, depth + 1);
+          return evalFormula({ type: 'formula', formula: matched }, order, depth + 1, _agg);
         }
       }
       // 无匹配分组时，用主公式兜底（主公式可为空，此时返回空）
@@ -2782,7 +2808,7 @@
           let numVal = 0;
           if (f.type === 'formula') {
             // 公式字段：订单里不存数值，需递归计算其当前值（含分组）
-            const fv = evalFormula(f, order, depth + 1);
+            const fv = evalFormula(f, order, depth + 1, _agg);
             if (fv !== '' && fv !== null && fv !== undefined) numVal = parseFloat(String(fv)) || 0;
           } else {
             const v = order[f.key];
@@ -2794,7 +2820,28 @@
             substitutions[f.label] = String(numVal);
           }
         });
+        // 「总字段名」= 合计值。只有传了 _agg 且这个字段算过合计才登记；
+        // 不登记时该 token 会被后面的"清字符"步骤去掉，等价于当成 0，
+        // 所以老公式（不含"总"）完全不受影响。
+        // 注意：如果碰巧有个真实字段就叫「总售价」，上面的循环已经占了同名 key，
+        //      这里就不覆盖 —— 真实字段优先，避免悄悄改掉老公式的含义。
+        if (_agg && _agg.sums) {
+          fieldsConfig.forEach(f => {
+            if (!f || !f.key) return;
+            if (!Object.prototype.hasOwnProperty.call(_agg.sums, f.key)) return;
+            const sumStr = String(_agg.sums[f.key]);
+            if (f.label) {
+              const tLabel = '总' + f.label;
+              if (!Object.prototype.hasOwnProperty.call(substitutions, tLabel)) substitutions[tLabel] = sumStr;
+            }
+            if (f.key && f.key !== f.label) {
+              const tKey = '总' + f.key;
+              if (!Object.prototype.hasOwnProperty.call(substitutions, tKey)) substitutions[tKey] = sumStr;
+            }
+          });
+        }
         // 按长度从长到短排序，避免短的先被替换
+        // （「总售价」比「售价」长，所以一定会先被替换掉，不会被拆成"总100"）
         const keys = Object.keys(substitutions).sort((a,b) => b.length - a.length);
         for (const k of keys) {
           if (/^[a-zA-Z_]/.test(k)) {
@@ -2803,6 +2850,12 @@
             expr = expr.split(k).join(substitutions[k]);
           }
         }
+        // 【安全闸】替换完成后如果还留着"总"字，说明这是一个"没解析成功的『总X』"。
+        // 绝不能让它继续算下去：比如 总售价 在没传合计上下文时，
+        // 会被「售价」的替换拆成 "总1000"，再被清字符步骤吞掉"总" → 静默变成 1000。
+        // 那不是报错，而是"数字看着对、含义完全错"，比报错危险得多。
+        // 所以这里直接返回空（界面上显示"—"=算不出），宁可让你发现公式没用对。
+        if (expr.indexOf('总') >= 0) return '';
         // 处理 round(), abs(), ceil(), floor() 函数
         const funcStack = [];
         let funcIdx = 0;
@@ -2890,12 +2943,28 @@
           expr = expr.split(placeholder).join('(' + funcResult + ')');
         }
         if (!expr) return '';
-        if (/^[+\-*/]/.test(expr)) {
-          expr = '1' + expr;
+        // 求值。这里必须"先按原样算，算不出来才补 1"。
+        // 以前是先判断"开头是不是运算符"就补 1，导致【负数结果被改坏】：
+        //   例如某公式字段的值是 -490，另一个公式引用它 → 表达式就是 "-490"，
+        //   被补成 "1-490" → 算成 -489（差 1，而且完全看不出来！）。
+        //   这是真实的老 bug（被「总X」功能暴露出来：差额常常是负数）。
+        // 补 1 这个兜底依然保留，专门用于用户写的"缺左操作数"片段（如 *2、+5）。
+        let result = null, ok = false;
+        try {
+          const r0 = Function('"use strict";return (' + expr + ')')();
+          if (typeof r0 === 'number' && isFinite(r0)) { result = r0; ok = true; }
+        } catch (e0) { ok = false; }
+        if (!ok) {
+          let expr2 = expr;
+          if (/^[+\-*/]/.test(expr2)) expr2 = '1' + expr2;
+          expr2 = expr2.replace(/[+\-*/]+$/, '');
+          if (!expr2) return '';
+          try {
+            const r1 = Function('"use strict";return (' + expr2 + ')')();
+            if (typeof r1 === 'number' && isFinite(r1)) { result = r1; ok = true; }
+          } catch (e1) { ok = false; }
         }
-        expr = expr.replace(/[+\-*/]+$/, '');
-        if (!expr) return '';
-        const result = Function('"use strict";return (' + expr + ')')();
+        if (!ok) return '';
         if (result === undefined || result === null || isNaN(result) || !isFinite(result)) return '';
         return Math.round(result * 100) / 100;
       } catch (e) {
@@ -7150,12 +7219,44 @@
       _bcSortKey = 'result'; _bcSortDir = -1;
       _bcRangeFilter = null;
       _bcFormula = ''; _bcNote = '';
+      _bcAgg = null;   // 合计上下文也清掉，避免显示上一次的计算依据
       const historyEl = document.getElementById('batchHistory');
       if (historyEl) historyEl.dataset.expanded = 'false';
       renderCalcPresets();
       renderCalcHistory();
       document.getElementById('batchCalcModal').classList.add('show');
       setTimeout(() => { document.getElementById('batchCalcFormula').focus(); }, 50);
+      renderBatchAggHint();
+    }
+
+    // 「总X」整体计算的示例提示：按用户实际的数字字段生成，点一下填入输入框
+    // （不硬编码"售价/进价"这种具体字段名，换个项目也能用）
+    function renderBatchAggHint() {
+      const el = document.getElementById('batchAggHint');
+      if (!el) return;
+      const nums = fieldsConfig.filter(function (f) { return f.type === 'number'; });
+      if (nums.length < 1) { el.innerHTML = ''; return; }
+      const a = nums[0];
+      let formula, desc;
+      if (nums.length >= 2) {
+        const b = nums[1];
+        formula = '(总' + a.label + ' - 总' + b.label + ') / 总' + a.label + ' * 100';
+        desc = '整体利润率（总' + a.label + ' 当分母）';
+      } else {
+        formula = '总' + a.label;
+        desc = '所有选中订单的' + a.label + '合计';
+      }
+      el.innerHTML = '💡 想算<b>整体</b>指标？在字段名前加「总」= 所有选中订单的合计。' +
+        '<a href="javascript:void(0)" onclick="useAggExample(\'' + escapeJs(formula) + '\')" ' +
+        'style="color:#722ed1;text-decoration:underline;margin-left:4px;">填入示例：' + escapeHtml(formula) + '</a>' +
+        '<span style="color:#aaa;">（' + escapeHtml(desc) + '，可自行修改）</span>';
+    }
+    function useAggExample(formula) {
+      const inp = document.getElementById('batchCalcFormula');
+      if (!inp) return;
+      inp.value = formula;
+      try { inp.focus(); } catch (e) {}
+      showToast('已填入示例公式，可自行修改后点「计算」');
     }
 
     function renderCalcPresets() {
@@ -7385,6 +7486,7 @@
     let _bcRangeFilter = null;       // {lo, hi} 点柱子后的区间筛选
     let _bcFormula = '';             // 当前公式（渲染时用）
     let _bcNote = '';                // 分组模式的说明文案
+    let _bcAgg = null;               // 「总X」合计上下文（渲染"计算依据"用）
 
     function bcFmtNum(v) {
       if (typeof v !== 'number' || !isFinite(v)) return String(v);
@@ -7422,6 +7524,155 @@
       return Object.keys(set);
     }
     function args_hasResult(d) { return d.result !== '' && d.result !== null && d.result !== undefined; }
+
+    // ==================== 「总」= 合计（用户 2026-11-11 提出） ====================
+    // 需求原话："在字段名字前面加一个总字，就代表对所有订单该字段数字求和"。
+    // 于是同一个公式里既能用"售价"（这一单的），也能用"总售价"（所有选中订单的合计），
+    // 例如整体利润率：(总售价 - 总进价) / 总售价 * 100
+    //
+    // 设计要点：
+    //   ① 只统计【选中的订单】（批量计算本来就是"对选中订单计算"）。
+    //   ② 空值不计入合计，但要记下"缺了几单"，否则利润率会算虚高而用户不知道。
+    //   ③ 有真实字段叫「总售价」时，真实字段优先（见 evalFormula 里的注释），
+    //      并把这种情况记进 collisions，界面上提示，避免数字悄悄对不上。
+    //   ④ 只算"公式里真正用到的"合计，不浪费性能。
+
+    // 取一条订单在某字段上的数值；取不到返回 null（区分"没有值"和"值是0"）
+    function bcFieldNum(field, order) {
+      if (!field || !order) return null;
+      let v;
+      if (field.type === 'formula') {
+        // 公式字段不存数值，按这个订单单独算一次（不传 _agg，避免自己引用自己）
+        const r = evalFormula(field, order, 0, null);
+        if (r === '' || r === null || r === undefined) return null;
+        v = r;
+      } else {
+        v = order[field.key];
+      }
+      if (v === '' || v === null || v === undefined) return null;
+      if (typeof v === 'object') return null;
+      const n = (typeof v === 'number') ? v : parseFloat(String(v));
+      if (isNaN(n) || !isFinite(n)) return null;
+      return n;
+    }
+
+    // 公式里有没有用到「总X」
+    function bcFormulaUsesTotal(formula, field) {
+      if (!field) return false;
+      const s = String(formula || '');
+      if (field.label && s.indexOf('总' + field.label) >= 0) return true;
+      if (field.key && field.key !== field.label && s.indexOf('总' + field.key) >= 0) return true;
+      return false;
+    }
+
+    // 判断一段公式文字有没有引用某个字段（英文 key 要按单词边界匹配，避免误判）
+    function bcTextRefersField(text, f) {
+      if (!f || !text) return false;
+      const t = String(text);
+      if (f.label && t.indexOf(f.label) >= 0) return true;
+      if (!f.key) return false;
+      if (/^[a-zA-Z_]/.test(f.key)) {
+        const safe = f.key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return new RegExp('(^|[^0-9A-Za-z_])' + safe + '([^0-9A-Za-z_]|$)').test(t);
+      }
+      return t.indexOf(f.key) >= 0;
+    }
+
+    // 把"公式字段内部还可能用到别的公式"这一步展开：
+    // 例如批量公式写「差额」，而 差额 = 售价 - 总进价 —— 那"总进价"也要算合计。
+    // 只看外层字面会漏掉，导致「总进价」解析失败、差额算成 0（真实踩过）。
+    function bcCollectFormulaTexts(texts) {
+      const out = (texts || []).filter(function (t) { return t && String(t).trim(); }).map(String);
+      const seenField = {};
+      for (let round = 0; round < 5; round++) {
+        let added = false;
+        out.slice().forEach(function (t) {
+          fieldsConfig.forEach(function (f) {
+            if (!f || f.type !== 'formula' || !f.key || seenField[f.key]) return;
+            if (!bcTextRefersField(t, f)) return;
+            seenField[f.key] = true;
+            if (f.formula && out.indexOf(f.formula) < 0) { out.push(String(f.formula)); added = true; }
+            if (f.groupEnabled && f.groupRules) {
+              Object.keys(f.groupRules).forEach(function (k) {
+                const g = String(f.groupRules[k] || '');
+                if (g.trim() && out.indexOf(g) < 0) { out.push(g); added = true; }
+              });
+            }
+          });
+        });
+        if (!added) break;
+      }
+      return out;
+    }
+
+    // 计算合计上下文：{ sums, counts, missing, totalOrders, fields, collisions }
+    function bcComputeAggregates(orders, formulaTexts) {
+      const res = { sums: {}, counts: {}, missing: {}, totalOrders: (orders || []).length, fields: [], collisions: [] };
+      if (!orders || !orders.length) return res;
+      const texts = bcCollectFormulaTexts(Array.isArray(formulaTexts) ? formulaTexts : [formulaTexts]);
+      if (!texts.length) return res;
+
+      fieldsConfig.forEach(function (f) {
+        if (!f || !f.key) return;
+        const used = texts.some(function (t) { return bcFormulaUsesTotal(t, f); });
+        if (!used) return;
+        let sum = 0, cnt = 0, miss = 0;
+        orders.forEach(function (o) {
+          const n = bcFieldNum(f, o);
+          if (n === null) miss++;
+          else { sum += n; cnt++; }
+        });
+        // 浮点累加会有尾巴（0.1+0.2=0.30000000000000004），保留 6 位小数足够
+        res.sums[f.key] = Math.round(sum * 1e6) / 1e6;
+        res.counts[f.key] = cnt;
+        res.missing[f.key] = miss;
+        res.fields.push(f.key);
+        // 冲突检测：有没有哪个真实字段的名字正好是「总+这个字段名」
+        const tokenLabel = f.label ? ('总' + f.label) : '';
+        const tokenKey = f.key ? ('总' + f.key) : '';
+        const clash = fieldsConfig.find(function (g) {
+          if (!g || g.key === f.key) return false;
+          return (tokenLabel && (g.label === tokenLabel || g.key === tokenLabel)) ||
+                 (tokenKey && (g.label === tokenKey || g.key === tokenKey));
+        });
+        if (clash) res.collisions.push({ fieldLabel: f.label, realLabel: clash.label || clash.key });
+      });
+      return res;
+    }
+
+    // 结果页里展示"计算依据"（让用户能核对，也能看出哪些单缺数据）
+    function bcAggPanelHtml(agg) {
+      if (!agg || !agg.fields || agg.fields.length === 0) return '';
+      let rows = '';
+      agg.fields.forEach(function (k) {
+        const f = fieldsConfig.find(function (x) { return x.key === k; });
+        if (!f) return;
+        const sum = agg.sums[k];
+        const cnt = agg.counts[k] || 0;
+        const miss = agg.missing[k] || 0;
+        rows += '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;padding:5px 0;border-bottom:1px dashed #e8e8e8;">' +
+          '<span style="flex:0 0 auto;font-size:13px;color:#333;font-weight:600;">总' + escapeHtml(f.label) + '</span>' +
+          '<span style="font-size:15px;color:#722ed1;font-weight:700;">' + escapeHtml(bcFmtNum(sum)) + '</span>' +
+          '<span style="font-size:12px;color:#888;">参与 ' + cnt + ' 单</span>' +
+          (miss > 0
+            ? '<span style="font-size:12px;color:#cf1322;font-weight:600;">⚠️ 缺 ' + miss + ' 单（没填，未计入合计）</span>'
+            : '<span style="font-size:12px;color:#52c41a;">无缺失</span>') +
+          '</div>';
+      });
+      let html = '<div style="margin-top:10px;padding:10px 12px;border:1px solid #d3adf7;background:#f9f0ff;border-radius:8px;">' +
+        '<div style="font-size:13px;font-weight:600;color:#722ed1;margin-bottom:2px;">📐 计算依据（「总X」= 选中订单的合计）</div>' +
+        '<div style="font-size:12px;color:#8c8c8c;margin-bottom:6px;">共统计 ' + agg.totalOrders + ' 个选中订单；空值不计入合计。</div>' +
+        rows;
+      if (agg.collisions && agg.collisions.length) {
+        agg.collisions.forEach(function (c) {
+          html += '<div style="margin-top:6px;font-size:12px;color:#ad4e00;">⚠️ 你的字段里有一个就叫「' +
+            escapeHtml(c.realLabel) + '」，所以「总' + escapeHtml(c.fieldLabel) + '」会当成那个字段本身，不是合计。' +
+            '建议把该字段改个名字。</div>';
+        });
+      }
+      html += '</div>';
+      return html;
+    }
 
     // 排序：点击表头切换 降序/升序
     function batchCalcSortBy(key) {
@@ -7702,12 +7953,28 @@
       const usedKeys = bcUsedFieldKeysFromData(data);
 
       // ---------- ① 汇总 ----------
-      let html = '<div style="padding:12px;background:#f6ffed;border:1px solid #b7eb8f;border-radius:8px;font-size:14px;">';
+      // 用到了「总X」且每条订单算出来是同一个数 → 这只是"一个整体结论"，
+      // 这时候"求和"没有意义（等于把这个数加了 N 遍），必须说清楚，否则用户会误会。
+      const allSame = valid.length > 1 && nums.every(function (v) { return Math.abs(v - nums[0]) < 1e-9; });
+      const usedTotalFields = !!(_bcAgg && _bcAgg.fields && _bcAgg.fields.length);
+      let html = '';
+      if (usedTotalFields && allSame) {
+        html += '<div style="padding:12px;background:#f9f0ff;border:1px solid #d3adf7;border-radius:8px;font-size:14px;margin-bottom:8px;">' +
+          '<div style="margin-bottom:4px;">📐 <b>整体结果</b>（公式里用到了「总」，所有订单算出来是同一个数）</div>' +
+          '<div style="font-size:24px;font-weight:700;color:#722ed1;line-height:1.3;">' + escapeHtml(bcFmtNum(nums[0])) + '</div>' +
+          '<div style="font-size:12px;color:#8c8c8c;margin-top:4px;">下面是逐单明细（每单都是这个数）；' +
+          '『求和』只是把这个数加 ' + validCount + ' 遍，没有实际意义，看上面的整体结果即可。</div>' +
+          '</div>';
+      }
+      html += '<div style="padding:12px;background:#f6ffed;border:1px solid #b7eb8f;border-radius:8px;font-size:14px;">';
       html += '<div style="margin-bottom:4px;">📊 <b>汇总</b>（共 ' + validCount + ' 个有效结果）</div>';
       html += '<div style="display:flex;gap:20px;flex-wrap:wrap;">' +
         '<span>求和：<b style="color:#52c41a;">' + bcFmtNum(Math.round(sum * 100) / 100) + '</b></span>' +
         '<span>平均：<b style="color:#1677ff;">' + avg + '</b></span>' +
         '</div></div>';
+
+      // 「总X」的计算依据：让用户能核对，也能一眼看出哪些单缺数据
+      html += bcAggPanelHtml(_bcAgg);
 
       // 最值明细：说清"是哪一单、为什么"
       function extremeCard(item, value, isMax) {
@@ -7865,17 +8132,24 @@
       if (selectedList.length === 0) { showToast('⚠️ 没有选中订单'); return; }
 
       batchCalcDetailData = [];
-      selectedList.forEach(function (o) {
+      // 先把"每条订单会用到的公式"算出来，再统一算一次合计（分组模式下公式可能有很多条）
+      const plans = selectedList.map(function (o) {
         const gv = String(o[fieldKey] === null || o[fieldKey] === undefined ? '' : o[fieldKey]);
         let formula = rules[gv];
         if (!formula || !String(formula).trim()) formula = defaultFormula;
+        return { order: o, gv: gv, formula: String(formula || '') };
+      });
+      const agg = bcComputeAggregates(selectedList, plans.map(function (p) { return p.formula; }));
+      _bcAgg = agg;
+      plans.forEach(function (p) {
+        const o = p.order, gv = p.gv, formula = p.formula;
         let result = '';
         if (formula && String(formula).trim()) {
-          result = evalFormula({ type: 'formula', formula: String(formula) }, o);
+          result = evalFormula({ type: 'formula', formula: String(formula) }, o, 0, agg);
         }
         batchCalcDetailData.push({
           order: o,
-          formula: String(formula || ''),
+          formula: formula,
           result: result,
           note: '按「' + fieldDef.label + '」= ' + (gv === '' ? '（空）' : getDisplayText(fieldDef, o[fieldKey])) + '，使用该分组公式'
         });
@@ -7894,12 +8168,15 @@
       if (selectedList.length === 0) { showToast('⚠️ 没有选中订单'); return; }
       saveCalcHistory(formulaStr);
       renderCalcHistory();
+      // 先算「总X」的合计（只有公式里真的用到"总"才计算），再逐单求值
+      const agg = bcComputeAggregates(selectedList, [formulaStr]);
+      _bcAgg = agg;
       const tempField = { type: 'formula', formula: formulaStr };
       batchCalcDetailData = selectedList.map(function (o) {
         return {
           order: o,
           formula: formulaStr,
-          result: evalFormula(tempField, o),
+          result: evalFormula(tempField, o, 0, agg),
           note: ''
         };
       });
@@ -9611,7 +9888,7 @@
     bootstrap();
 
     // ============ PWA 离线缓存与更新 ============
-    const APP_VERSION = '2026.10.02-1'; // 每次修改系统时改一下版本号即可触发更新
+    const APP_VERSION = '2026.11.11-1'; // 每次修改系统时改一下版本号即可触发更新
     // 规则：YYYY.MM.DD-N，日期必须是【当天真实日期】，N 是当天第几次修改。
     // 历史教训：曾经照着前一天的日期往下累加，导致版本号日期失真（铁律 1 说的就是这个坑）。
 
@@ -9620,6 +9897,26 @@
     // 说明：2026.09.13-6 ~ -21 是按当时（9/13 起）连续的改动号，日期沿用当时发布的号；
     //       从 2026.09.15-1 起严格按"当天真实日期-当天序号"执行。
     const APP_CHANGELOG = [
+      {
+        ver: '2026.11.11-1', date: '2026-11-11',
+        items: [
+          ['✨ 新增', [
+            '批量计算支持「整体计算」：在字段名前加一个「总」字，就代表所有选中订单该字段的合计（如 总售价 = 所有选中订单的售价加起来）',
+            '算整体利润率：在批量计算器里写 (总售价 - 总进价) / 总售价 * 100 —— 单笔利润率求平均不等于整体利润率，现在能算对了',
+            '同一条公式里可以混用：售价 是这一单的值，总售价 是所有选中订单的合计',
+            '结果页会显示「计算依据」：每个用到的合计值、参与多少单、缺了几单（缺数据会让利润率虚高，必须能看见）',
+            '结果每单相同时（纯整体公式），会单独显示「整体结果」大字，并说明此时的「求和」没有实际意义'
+          ]],
+          ['🐛 修复', [
+            '【重要】公式结果如果是负数（如 -490），会被错误算成 -489（开头被自动补了个 1）。这个老问题一直存在，现在修好了',
+            '【重要】在不能算「总」的地方写了「总售价」，以前会静默当成单笔售价（数字看着对、含义是错的），现在会显示「算不出」'
+          ]],
+          ['📌 说明', [
+            '「总X」只统计【你选中的那些订单】，不是全部订单；空值不计入合计',
+            '这个功能只在「批量计算器」里可用；字段设置里的公式字段不支持（会拖慢表格）'
+          ]]
+        ]
+      },
       {
         ver: '2026.10.02-1', date: '2026-10-02',
         items: [
